@@ -2,69 +2,75 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 from sklearn.base import clone
-from tqdm import tqdm
+import torch
 
 
 # defining score basic class
-class Scores(ABC):
+class sbi_Scores(ABC):
     """
     Base class to build any conformity score of choosing.
     In this class, one can define any conformity score for any base model of interest, already fitted or not.
     ----------------------------------------------------------------
     """
 
-    def __init__(self, base_model, is_fitted, **kwargs):
+    def __init__(self, inference_obj, is_fitted=False):
+        self.inference_obj = inference_obj
         self.is_fitted = is_fitted
-        if self.is_fitted:
-            self.base_model = base_model
-        elif base_model is not None:
-            self.base_model = base_model(**kwargs)
 
     @abstractmethod
-    def fit(self, X, y):
+    def fit(self, X, theta):
         """
         Fit the base model to training data
         --------------------------------------------------------
         Input: (i)    X: Training feature matrix.
-               (ii)   y: Training label vector.
+               (ii)   theta: Training parameter vector.
 
         Output: Scores object
         """
         pass
 
     @abstractmethod
-    def compute(self, X_calib, y_calib):
+    def compute(self, X_calib, theta_calib):
         """
         Compute the conformity score in the calibration set
         --------------------------------------------------------
         Input: (i)    X_calib: Calibration feature matrix
-               (ii)   y_calib: Calibration label vector
+               (ii)   theta_calib: Calibration label vector
 
         Output: Conformity score vector
         """
         pass
 
-    @abstractmethod
-    def predict(self, X_test, cutoff):
-        """
-        Compute prediction intervals specified cutoff(s).
-        --------------------------------------------------------
-        Input: (i)    X_test: Test feature matrix
-               (ii)   cutoff: Cutoff vector
 
-        Output: Prediction intervals for test sample.
-        """
-        pass
+# HPD score
+class HPDScore(sbi_Scores):
+    def fit(self, X=None, thetas=None):
+        # setting up model for SBI package
+        if not self.is_fitted:
+            if not isinstance(X, torch.Tensor) or X.dtype != torch.float32:
+                X = torch.tensor(X, dtype=torch.float32)
+            if not isinstance(thetas, torch.Tensor) or thetas.dtype != torch.float32:
+                thetas = torch.tensor(thetas, dtype=torch.float32)
+            self.inference_obj.append_simulations(thetas, X)
+            self.inference_obj.train()
 
-
-# basic lambda score that does not need to be estimated
-class LambdaScore(Scores):
-    def fit(self, X, y):
+        self.posterior = self.inference_obj.build_posterior()
         return self
 
-    def compute(self, thetas, lambdas):
-        return lambdas
+    def compute(self, X_calib, thetas_calib):
+        if not isinstance(X_calib, torch.Tensor) or X_calib.dtype != torch.float32:
+            X_calib = torch.tensor(X_calib, dtype=torch.float32)
+        if (
+            not isinstance(thetas_calib, torch.Tensor)
+            or thetas_calib.dtype != torch.float32
+        ):
+            thetas_calib = torch.tensor(thetas_calib, dtype=torch.float32)
+        # computing posterior density for theta
+        return -(
+            torch.exp(self.posterior.log_prob_batched(thetas_calib, X_calib))
+            .detach()
+            .numpy()
+        )
 
-    def predict(self, thetas, cutoff):
-        pred = np.vstack((thetas - cutoff, thetas + cutoff)).T
-        return pred
+
+# TODO: waldo score and quantile score

@@ -2,212 +2,391 @@ import numpy as np
 import torch
 
 import matplotlib.pyplot as plt
-import seaborn as sns
+
+from sklearn.base import BaseEstimator, clone
+from sklearn.metrics import mean_squared_error
+from sklearn.model_selection import train_test_split
+from sklearn.tree import DecisionTreeRegressor, plot_tree
+from sklearn.ensemble import RandomForestRegressor
+from operator import itemgetter
 
 
-# class for performing conformal calibration
-
-
-class BayesianInference:
+# LOCART class for derivin cutoffs
+class LocartInf(BaseEstimator):
     """
-    A class for performing Bayesian inference using specified methods and priors.
-
-    Attributes:
-        method: Bayesian inference method to be used
-        prior: Prior distribution for the model
-        posterior: Posterior distribution after training
-        is_trained (bool): Flag indicating whether the model has been trained
+    Local Regression Tree.
+    Fit LOCART and LOFOREST local calibration methods for any bayesian score and base model of interest. The specification of the score
+    can be made through the usage of the basic class "sbi_Scores". Through the "split_calib" parameter we can decide whether to use all calibration set to
+    obtain both the partition and cutoffs or split it into two sets, one specific for partitioning and other for obtaining the local cutoffs. Also, if
+    desired, we can fit the augmented version of both our method (A-LOCART and A-LOFOREST) by the "weighting" parameter, which if True, adds conditional variance estimates to our feature matrix in the calibration and prediction step.
+    ----------------------------------------------------------------
     """
 
-    def __init__(self, method, prior):
+    def __init__(
+        self,
+        sbi_score,
+        base_inference,
+        alpha,
+        is_fitted=False,
+        cart_type="CART",
+        split_calib=True,
+        weighting=False,
+    ):
         """
-        Initialize the Bayesian inference model.
-
-        Args:
-            method: Inference method to use
-            prior: Prior distribution for the parameters
+        Input: (i)    sbi_score: Bayesian score of choosing. It can be specified by instantiating a Bayesian score class based on the sbi_Scores basic class.
+               (ii)   base_inference: Base SBI inference model to be embedded in the score class.
+               (iii)  alpha: Float between 0 and 1 specifying the miscoverage level of resulting prediction region.
+               (iv)   base_model_type: Boolean indicating whether the base model ouputs quantiles or not. Default is False.
+               (v)    cart_type: Set "CART" to obtain LOCART prediction intervals and "RF" to obtain LOFOREST prediction intervals. Default is CART.
+               (vi)   split_calib: Boolean designating if we should split the calibration set into partitioning and cutoff set. Default is True.
+               (viii) weighting: Set whether we should augment the feature space with conditional variance estimates. Default is False.
         """
-        self.method = method
-        self.prior = prior
-        self.is_trained = False
+        self.sbi_score = sbi_score(
+            base_inference,
+            is_fitted=is_fitted,
+        )
 
-    def fit(self, x, num_sims=1000):
+        # checking if base model is fitted
+        self.base_inference = self.sbi_score.inference_obj
+        self.alpha = alpha
+        self.cart_type = cart_type
+        self.split_calib = split_calib
+        self.weighting = weighting
+
+    def fit(self, X, theta, random_seed_tree=1250, **kwargs):
         """
-        Train the model by fitting the posterior distribution.
+        Fit base model embeded in the conformal score class to the training set.
+        If "weigthing" is True, we fit a Random Forest model to obtain variance estimations as done in Bostrom et.al.(2021).
+        --------------------------------------------------------
 
-        Args:
-            x: Observed data
-            num_sims (int): Number of simulations to run
+        Input: (i)    X: Training numpy feature matrix
+               (ii)   y: Training label array
+               (iii)  random_seed_tree: Random Forest random seed for variance estimation (if weighting parameter is True).
+               (iv)   **kwargs: Keyword arguments passed to fit the random forest used for variance estimation.
+
+        Output: LocartSplit object
         """
-        inference = self.method(self.prior)
-        theta = self.prior.sample((num_sims,))
-        inference.append_simulations(theta, x).train()
+        self.base_inference.fit(X, theta)
+        if self.weighting == True:
+            # TODO: add better option for weighting and A-locart
+            self.dif_model = (
+                RandomForestRegressor(random_state=random_seed_tree)
+                .set_params(**kwargs)
+                .fit(X, theta)
+            )
+        # TODO: add CDF of the score modification inside LOCART
+        return self
 
-        self.posterior = inference.build_posterior()
-        self.is_trained = True
-
-    def sample_posterior(self, x, num_sims=1000):
+    def calib(
+        self,
+        X_calib,
+        theta_calib,
+        random_seed=1250,
+        prune_tree=True,
+        prune_seed=780,
+        cart_train_size=0.5,
+        **kwargs
+    ):
         """
-        Sample from the trained posterior distribution.
+        Calibrate conformity score using CART
+        As default, we fix "min_samples_leaf" as 100 for the CART algorithm,meaning that each partition element will have at least
+        100 samples each, and use the sklearn default for the remaining parameters. To generate other partitioning schemes, all CART parameters
+        can be changed through keyword arguments, but we recommend changing only the "min_samples_leaf" argument if needed.
+        --------------------------------------------------------
 
-        Args:
-            x: Data to condition the sampling (single observation)
-            num_sims (int): Number of samples to generate
+        Input: (i)    X_calib: Calibration numpy feature matrix
+               (ii)   theta_calib: Calibration parameter array
+               (iii)  random_seed: Random seed for CART or Random Forest fitted to the confomity scores.
+               (iv)   prune_tree: Boolean indicating whether CART tree should be pruned or not.
+               (v)    prune_seed: Random seed set for data splitting in the prune step.
+               (vi)   cart_train_size: Proportion of calibration data used in partitioning.
+               (vii)    **kwargs: Keyword arguments to be passed to CART or Random Forest.
 
-        Returns:
-            Samples from the posterior distribution as numpy array
-
-        Raises:
-            RuntimeError: If called before training the model
+        Ouput: Vector of cutoffs.
         """
-        if not self.is_trained:
-            raise RuntimeError("Model must be trained before sampling")
+        res = self.sbi_score.compute(X_calib, theta_calib)
 
-        # Convert to tensor if needed
-        if isinstance(x, np.ndarray):
-            x = torch.from_numpy(x).float()
+        if self.weighting:
+            w = self.compute_difficulty(X_calib)
+            X_calib = np.concatenate((X_calib, w.reshape(-1, 1)), axis=1)
 
-        samples = self.posterior.sample((num_sims,), x=x)
+        # splitting calibration data into a partitioning set and a cutoff set
+        if self.split_calib:
+            (
+                X_calib_train,
+                X_calib_test,
+                res_calib_train,
+                res_calib_test,
+            ) = train_test_split(
+                X_calib, res, test_size=1 - cart_train_size, random_state=random_seed
+            )
 
-        return samples.numpy()
+        if self.cart_type == "CART":
+            # declaring decision tree
+            self.cart = DecisionTreeRegressor(
+                random_state=random_seed, min_samples_leaf=100
+            ).set_params(**kwargs)
+            # obtaining optimum alpha to prune decision tree
+            if prune_tree:
+                if self.split_calib:
+                    (
+                        X_train_prune,
+                        X_test_prune,
+                        res_train_prune,
+                        res_test_prune,
+                    ) = train_test_split(
+                        X_calib_train,
+                        res_calib_train,
+                        test_size=0.5,
+                        random_state=prune_seed,
+                    )
+                else:
+                    (
+                        X_train_prune,
+                        X_test_prune,
+                        res_train_prune,
+                        res_test_prune,
+                    ) = train_test_split(
+                        X_calib,
+                        res,
+                        test_size=0.5,
+                        random_state=prune_seed,
+                    )
 
-    def quantile_posterior(self, x, alpha, num_sims=1000):
+                optim_ccp = self.prune_tree(
+                    X_train_prune, X_test_prune, res_train_prune, res_test_prune
+                )
+                # pruning decision tree
+                self.cart.set_params(ccp_alpha=optim_ccp)
+
+            # fitting and predicting leaf labels
+            if self.split_calib:
+                self.cart.fit(X_calib_train, res_calib_train)
+                leafs_idx = self.cart.apply(X_calib_test)
+            else:
+                self.cart.fit(X_calib, res)
+                leafs_idx = self.cart.apply(X_calib)
+
+            self.leaf_idx = np.unique(leafs_idx)
+            self.cutoffs = {}
+
+            for leaf in self.leaf_idx:
+                if self.split_calib:
+                    current_res = res_calib_test[leafs_idx == leaf]
+
+                    # correcting 1 - alpha
+                    n = current_res.shape[0]
+
+                    self.cutoffs[leaf] = np.quantile(
+                        current_res, q=np.ceil((n + 1) * (1 - self.alpha)) / n
+                    )
+                else:
+                    current_res = res[leafs_idx == leaf]
+
+                    # correcting 1 - alpha
+                    n = current_res.shape[0]
+
+                    self.cutoffs[leaf] = np.quantile(
+                        current_res, q=np.ceil((n + 1) * (1 - self.alpha)) / n
+                    )
+
+        return self.cutoffs
+
+    def compute_difficulty(self, X):
         """
-        Args:
-            x: data to condition the sampling
-            alpha: vector with alphas values for compute quantile
-            num_sims (int): Number of samples to generate
+        Auxiliary function to compute difficulty for each sample.
+        --------------------------------------------------------
+        input: (i)    X: specified numpy feature matrix
 
-        Returns:
-            Quantiles alpha for each value of x using MC quantile of sample_posterior
+        output: Vector of variance estimates for each sample.
         """
-        if any((a < 0) or (a > 1) for a in alpha):
-            raise ValueError("All alpha values must be between 0 and 1")
+        cart_pred = np.zeros((X.shape[0], len(self.dif_model.estimators_)))
+        i = 0
+        # computing the difficulty score for each X_score
+        for cart in self.dif_model.estimators_:
+            cart_pred[:, i] = cart.predict(X)
+            i += 1
+        # computing variance for each dataset row
+        return cart_pred.var(1)
 
-        # Get posterior samples
-        samples = self.sample_posterior(x, num_sims)
-
-        # Compute quantiles
-        quantiles = np.quantile(samples, alpha, axis=0)
-
-        return quantiles
-
-    def mean_posterior(self, x, num_sims=1000):
+    def prune_tree(self, X_train, X_valid, res_train, res_valid):
         """
-        Args:
-            x: data to condition the sampling
-            num_sims (int): Number of samples to generate
+        Auxiliary function to conduct decision tree post pruning.
+        --------------------------------------------------------
+        Input: (i)    X_train: numpy feature matrix used to fit decision trees for each cost complexity alpha values.
+               (ii)   X_valid: numpy feature matrix used to validate each cost complexity path.
+               (iii)  res_train: conformal scores used to fit decision trees for each cost complexity alpha values.
+               (iv)   res_valid: conformal scores used to validate each cost complexity path.
 
-        Returns:
-            Mean for each value of x using MC quantile of sample_posterior
+        Output: Optimal cost complexity path to perform pruning.
         """
-        # Get posterior samples
-        samples = self.sample_posterior(x, num_sims)
+        prune_path = self.cart.cost_complexity_pruning_path(X_train, res_train)
+        ccp_alphas = prune_path.ccp_alphas
+        current_loss = float("inf")
+        # cross validation by data splitting to choose alphas
+        for ccp_alpha in ccp_alphas:
+            preds_ccp = (
+                clone(self.cart)
+                .set_params(ccp_alpha=ccp_alpha)
+                .fit(X_train, res_train)
+                .predict(X_valid)
+            )
+            loss_ccp = mean_squared_error(res_valid, preds_ccp)
+            if loss_ccp < current_loss:
+                current_loss = loss_ccp
+                optim_ccp = ccp_alpha
 
-        # Compute mean
-        mean = np.mean(samples, axis=0)
+        return optim_ccp
 
-        return mean
+    def plot_locart(self, title=None):
+        """
+        Plot decision tree feature space partition
+        --------------------------------------------------------
+        Output: Decision tree plot object.
+        """
+        if self.cart_type == "CART":
+            plot_tree(self.cart, filled=True)
+            if title == None:
+                plt.title("Decision Tree fitted to non-conformity score")
+            else:
+                plt.title(title)
+            plt.show()
+
+    def predict_cutoff(self, X):
+        """
+        Predict cutoffs for each test sample using locart local cutoffs.
+        --------------------------------------------------------
+        Input: (i)    X: test numpy feature matrix
+
+        Output: Cutoffs for each test sample.
+        """
+        # identifying cutoff point
+        if self.weighting:
+            w = self.compute_difficulty(X)
+            X_tree = np.concatenate((X, w.reshape(-1, 1)), axis=1)
+        else:
+            X_tree = X
+
+        leaves_idx = self.cart.apply(X_tree)
+        cutoffs = np.array(itemgetter(*leaves_idx)(self.cutoffs))
+
+        return cutoffs
 
 
+# class for conformalizing bayesian credible regions
 class BayCon:
-    def __init__(self, model, score_type="CQR"):
+    def __init__(
+        self,
+        sbi_score,
+        base_inference,
+        is_fitted=False,
+        conformal_method="global",
+        alpha=0.1,
+    ):
         """
         Class for computing statistical scores.
 
         Args:
-            model: Bayesian inference model instance
-            score_type (str): Type of score to compute ('CQR' or 'RS')
+            sbi_score: Bayesian score class instance
+            base_inference: Base inference model to be used
+            is_fitted (bool): Flag indicating if the model is fitted
+            conformal_method (str): Method for conformal prediction ('global' or 'local')
         """
-        self.BI_model = model
-        self.score_type = score_type
+        self.is_fitted = is_fitted
+        self.sbi_score = sbi_score(
+            base_inference,
+            is_fitted=is_fitted,
+        )
 
-    def compute_score(self, x, theta, prob=[0.025, 0.975]):
+        # checking if base model is fitted
+        self.base_inference = self.sbi_score.inference_obj
+        self.conformal_method = conformal_method
+        self.alpha = alpha
+
+    def fit(self, X, theta):
         """
-        Computes the score based on the specified type.
+        Fit the SBI score to the training data.
 
         Args:
-            x: Input data
-            theta: Parameter value
-            prob (list): Significance levels (for CQR score)
-
-        Returns:
-            Computed score
-
-        Raises:
-            ValueError: If unknown score type is specified
+            X: Training feature matrix
+            theta: Training parameter vector
         """
-        if isinstance(x, torch.Tensor):
-            x = x.numpy()
-        if isinstance(theta, torch.Tensor):
-            theta = theta.numpy()
 
-        if self.score_type == "CQR":
-            quantile_score = self.BI_model.quantile_posterior(x, prob)
-            return np.maximum(quantile_score[0] - theta, theta - quantile_score[1])
-        elif self.score_type == "RS":
-            mean_score = self.BI_model.mean_posterior(x)
-            return np.abs(theta - mean_score)
-        else:
-            raise ValueError("Unknown score type. Choose either 'CQR' or 'RS'")
+        self.sbi_score.fit(X, theta)
+        self.is_fitted = True
+        return self
 
-    def calib(self, x, theta, alpha=0.05):
+    def calib(
+        self,
+        X_calib,
+        theta_calib,
+        split_calib=False,
+        weighting=False,
+        locart_kwargs=None,
+    ):
         """
-        Compute the conformal threshold for prediction intervals.
+        Calibrate the credible region using the calibration set.
 
         Args:
-            x: Input data (calibration set)
-            theta: True parameters (calibration set)
-            alpha: Significance level (1 - coverage)
+            X_calib: Calibration feature matrix
+            theta_calib: Calibration parameter vector
+            split_calib: Boolean indicating whether to split calibration data for partitioning and cutoff in LOCART algorithm
+            weighting: Boolean indicating whether to use weighting in LOCART algorithm
+            locart_kwargs: Additional arguments for LOCART calibration. Must be in a dictionary format with each entry being a parameter of interest.
 
         Raises:
             RuntimeError: If called with empty data
         """
-        if len(x) == 0 or len(theta) == 0:
+        if len(X_calib) == 0 or len(theta_calib) == 0:
             raise RuntimeError("Calibration data cannot be empty")
 
-        # Compute scores for all calibration points
-        scores = np.array([self.compute_score(x[i], theta[i]) for i in range(len(x))])
+        # computing cutoffs using standard approach
+        if self.conformal_method == "global":
+            res = self.sbi_score.compute(X_calib, theta_calib)
+            n = res.shape[0]
 
-        # Calculate the (1-alpha) quantile of scores
-        self.t_conformal = np.quantile(scores, 1 - alpha, method="higher")
+            # computing cutoff
+            self.cutoff = np.quantile(res, q=np.ceil((n + 1) * (1 - self.alpha)) / n)
 
-    def interval_conformal(self, x, alpha=0.05):
-        """
-        Compute conformal prediction interval for new observation.
-
-        Args:
-            x: New observation
-            alpha: Significance level (1 - coverage)
-
-        Returns:
-            Dictionary containing:
-            - 'interval': List of [lower, upper] bounds for each dimension
-            - 'contains_true': Boolean array indicating if test_theta is within bounds
-            - 'width': Array of interval widths for each dimension
-        """
-        if not hasattr(self, "t_conformal"):
-            raise RuntimeError("Must run calib() first to compute t_conformal")
-
-        if isinstance(x, torch.Tensor):
-            x = x.numpy()
-
-        if self.score_type == "CQR":
-            quantile_score = self.BI_model.quantile_posterior(
-                x, [alpha / 2, 1 - alpha / 2]
+        # computing cutoffs using LOCART
+        if self.conformal_method == "local":
+            self.locart = LocartInf(
+                self.sbi_score,
+                self.base_inference,
+                alpha=self.alpha,
+                is_fitted=self.is_fitted,
+                split_calib=split_calib,
+                weighting=weighting,
             )
-            lower = quantile_score[0] - self.t_conformal
-            upper = quantile_score[1] + self.t_conformal
-        elif self.score_type == "RS":
-            mean_score = self.BI_model.mean_posterior(x)
-            lower = mean_score - self.t_conformal
-            upper = mean_score + self.t_conformal
-        else:
-            raise ValueError("Unknown score type. Choose either 'CQR' or 'RS'")
+            self.locart.fit(X_calib, theta_calib)
+            if locart_kwargs is not None:
+                self.cutoff = self.locart.calib(X_calib, theta_calib, **locart_kwargs)
+            else:
+                self.cutoff = self.locart.calib(X_calib, theta_calib)
 
-        # Convert to more readable output format
-        return {
-            "interval": np.stack([lower, upper], axis=1),
-            "width": upper - lower,
-            "coverage_level": 1 - alpha,
-        }
+        return self.cutoff
+        # TODO: HPD split/ Dheurs version
+
+    def predict_cutoff(
+        self,
+        X_test,
+    ):
+        """
+        Predict cutoffs for test samples using the calibrated conformal method.
+        Args:
+        X_test (numpy.ndarray): Test feature matrix.
+        numpy.ndarray: Predicted cutoffs for each test sample.
+
+        RuntimeError: If the conformal method is not calibrated before calling this function.
+        """
+        if self.conformal_method == "local":
+            if self.locart is None:
+                raise RuntimeError(
+                    "Conformal method must be calibrated before prediction"
+                )
+            cutoffs = self.locart.predict_cutoff(X_test)
+        elif self.conformal_method == "global":
+            cutoffs = np.repeat(self.cutoff, X_test.shape[0])
+
+        # TODO: add HPD split/ Dheurs version
+        return cutoffs
