@@ -65,12 +65,18 @@ class HPDScore(sbi_Scores):
             or thetas_calib.dtype != torch.float32
         ):
             thetas_calib = torch.tensor(thetas_calib, dtype=torch.float32)
+        # obtaining posterior estimators
+        par_n = thetas_calib.shape[0]
+        log_prob_array = np.zeros(par_n)
+        for i in range(par_n):
+            log_prob_array[i] = (
+                self.posterior.log_prob(thetas_calib[i, :], x=X_calib[i, :])
+                .detach()
+                .numpy()
+            )
+
         # computing posterior density for theta
-        return -(
-            torch.exp(self.posterior.log_prob_batched(thetas_calib, X_calib))
-            .detach()
-            .numpy()
-        )
+        return -(np.exp(log_prob_array))
 
 
 # TODO: waldo score and quantile score

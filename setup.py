@@ -29,7 +29,7 @@ setup(
         "matplotlib==3.9.2",
         "tqdm==4.66.5",
         "torch>=2.5.1",
-        "sbi>=0.21.0",
+        "sbi>=0.24.0",
     ],
     python_requires=">=3.10",
     zip_safe=False,

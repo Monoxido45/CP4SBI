@@ -66,7 +66,7 @@ class LocartInf(BaseEstimator):
 
         Output: LocartSplit object
         """
-        self.base_inference.fit(X, theta)
+        self.sbi_score.fit(X, theta)
         if self.weighting == True:
             # TODO: add better option for weighting and A-locart
             self.dif_model = (
@@ -282,6 +282,8 @@ class BayCon:
         is_fitted=False,
         conformal_method="global",
         alpha=0.1,
+        split_calib=False,
+        weighting=False,
     ):
         """
         Class for computing statistical scores.
@@ -293,15 +295,24 @@ class BayCon:
             conformal_method (str): Method for conformal prediction ('global' or 'local')
         """
         self.is_fitted = is_fitted
+        self.conformal_method = conformal_method
         self.sbi_score = sbi_score(
             base_inference,
             is_fitted=is_fitted,
         )
-
+        self.base_inference = base_inference
         # checking if base model is fitted
-        self.base_inference = self.sbi_score.inference_obj
-        self.conformal_method = conformal_method
         self.alpha = alpha
+
+        if self.conformal_method == "local":
+            self.locart = LocartInf(
+                sbi_score,
+                base_inference,
+                alpha=self.alpha,
+                is_fitted=self.is_fitted,
+                split_calib=split_calib,
+                weighting=weighting,
+            )
 
     def fit(self, X, theta):
         """
@@ -311,17 +322,16 @@ class BayCon:
             X: Training feature matrix
             theta: Training parameter vector
         """
-
-        self.sbi_score.fit(X, theta)
-        self.is_fitted = True
+        if self.conformal_method == "local":
+            self.locart.fit(X, theta)
+        else:
+            self.sbi_score.fit(X, theta)
         return self
 
     def calib(
         self,
         X_calib,
         theta_calib,
-        split_calib=False,
-        weighting=False,
         locart_kwargs=None,
     ):
         """
@@ -330,13 +340,17 @@ class BayCon:
         Args:
             X_calib: Calibration feature matrix
             theta_calib: Calibration parameter vector
-            split_calib: Boolean indicating whether to split calibration data for partitioning and cutoff in LOCART algorithm
-            weighting: Boolean indicating whether to use weighting in LOCART algorithm
             locart_kwargs: Additional arguments for LOCART calibration. Must be in a dictionary format with each entry being a parameter of interest.
 
         Raises:
             RuntimeError: If called with empty data
         """
+        # Ensure X_calib and theta_calib are numpy arrays
+        if isinstance(X_calib, torch.Tensor):
+            X_calib = X_calib.numpy()
+        if isinstance(theta_calib, torch.Tensor):
+            theta_calib = theta_calib.numpy()
+
         if len(X_calib) == 0 or len(theta_calib) == 0:
             raise RuntimeError("Calibration data cannot be empty")
 
@@ -349,15 +363,7 @@ class BayCon:
             self.cutoff = np.quantile(res, q=np.ceil((n + 1) * (1 - self.alpha)) / n)
 
         # computing cutoffs using LOCART
-        if self.conformal_method == "local":
-            self.locart = LocartInf(
-                self.sbi_score,
-                self.base_inference,
-                alpha=self.alpha,
-                is_fitted=self.is_fitted,
-                split_calib=split_calib,
-                weighting=weighting,
-            )
+        elif self.conformal_method == "local":
             self.locart.fit(X_calib, theta_calib)
             if locart_kwargs is not None:
                 self.cutoff = self.locart.calib(X_calib, theta_calib, **locart_kwargs)
@@ -371,7 +377,7 @@ class BayCon:
         self,
         X_test,
     ):
-        """
+        """self.is_fitted = True
         Predict cutoffs for test samples using the calibrated conformal method.
         Args:
         X_test (numpy.ndarray): Test feature matrix.
