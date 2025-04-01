@@ -1,9 +1,9 @@
-import baycon
+import CP4SBI
 import torch
 from sbi.utils import BoxUniform
 from sbi.inference import NPE
-from baycon import BayesianInference
-from baycon import BAYCON
+from CP4SBI.baycon import BayesianInference
+from CP4SBI.baycon import BayCon
 
 
 # Example usage:
@@ -33,7 +33,7 @@ print("Posterior samples for x_o:")
 print(BI_model.sample_posterior(x_o, num_sims=5))  # Just show 5 samples
 
 # 5. Create score model and compute score
-Score_model = BAYCON(BI_model, score_type="CQR")  # Using CQR score
+Score_model = BayCon(BI_model, score_type="CQR")  # Using CQR score
 test_theta = theta_train[0]  # Using first theta for demonstration
 print("\nScore for test point:")
 print(Score_model.compute_score(x_o, test_theta))

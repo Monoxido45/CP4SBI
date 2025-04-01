@@ -1,0 +1,2 @@
+conda activate sbi_env
+pip install .
