@@ -3,6 +3,7 @@ from sbi.utils import BoxUniform
 from sbi.inference import NPE
 from CP4SBI.baycon import BayCon
 from CP4SBI.scores import HPDScore
+from tqdm import tqdm
 
 # Example usage:
 num_dims = 3
@@ -28,9 +29,10 @@ inference.append_simulations(theta_train, x_train).train()
 
 posterior = inference.build_posterior()
 
-# Evaluate log-probabilities for calibration data
-
-log_probs = posterior.log_prob(theta_calib[0, :], x=x_calib[0, :])
+# Evaluate log-probabilities for calibration data and test
+log_probs = torch.zeros(num_calib)
+for i in tqdm(range(num_calib)):
+    log_probs[i] = posterior.log_prob(theta_calib[i, :], x=x_calib[i, :])
 
 
 # 4. Fit BayCon to HPD score using local conformal
