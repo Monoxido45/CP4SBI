@@ -23,9 +23,9 @@ setup(
         "simulation-based inference",
     ],
     install_requires=[
-        "numpy>=2.2.4",
+        "numpy>=1.25.0",
         "scikit-learn==1.5.1",
-        "scipy==1.14.1",
+        "scipy>=1.12.0",
         "matplotlib==3.9.2",
         "tqdm==4.66.5",
         "torch>=2.5.1",

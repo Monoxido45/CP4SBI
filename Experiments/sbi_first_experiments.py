@@ -1,15 +1,14 @@
-import CP4SBI
 import torch
 from sbi.utils import BoxUniform
 from sbi.inference import NPE
-from CP4SBI.baycon import BayesianInference
 from CP4SBI.baycon import BayCon
-
+from CP4SBI.scores import HPDScore
+from tqdm import tqdm
 
 # Example usage:
 num_dims = 3
 num_sims = 1000
-num_calib = 500  # Number of calibration points
+num_calib = 1000  # Number of calibration points
 
 # 1. Define prior and simulator
 prior = BoxUniform(low=-2 * torch.ones(num_dims), high=2 * torch.ones(num_dims))
@@ -25,45 +24,35 @@ theta_calib = prior.sample((num_calib,))
 x_calib = simulator(theta_calib)
 
 # 3. Train Bayesian model
-BI_model = BayesianInference(NPE, prior)
-BI_model.fit(x_train)
+inference = NPE(prior)
+inference.append_simulations(theta_train, x_train).train()
 
-# 4. Sample from posterior for test observation
-print("Posterior samples for x_o:")
-print(BI_model.sample_posterior(x_o, num_sims=5))  # Just show 5 samples
+posterior = inference.build_posterior()
 
-# 5. Create score model and compute score
-Score_model = BayCon(BI_model, score_type="CQR")  # Using CQR score
-test_theta = theta_train[0]  # Using first theta for demonstration
-print("\nScore for test point:")
-print(Score_model.compute_score(x_o, test_theta))
+# Evaluate log-probabilities for calibration data and test
+log_probs = torch.zeros(num_calib)
+for i in tqdm(range(num_calib)):
+    log_probs[i] = posterior.log_prob(theta_calib[i, :], x=x_calib[i, :])
 
-# 6. Calibrate using calibration set
-print("\nCalibrating with calibration set...")
-Score_model.calib(x_calib, theta_calib, alpha=0.5)  # 95% coverage
-print(f"Conformal threshold (t): {Score_model.t_conformal}")
 
-# 7. # Get conformal prediction interval for test observation
+# 4. Fit BayCon to HPD score using local conformal
+bayes_conf = BayCon(
+    sbi_score=HPDScore,
+    base_inference=inference,
+    is_fitted=True,
+    conformal_method="local",
+)
+bayes_conf.fit(
+    X=x_train,
+    theta=theta_train,
+)
+
+# 5. Computing cutoffs and calibrating
+bayes_conf.calib(
+    X_calib=x_calib,
+    theta_calib=theta_calib,
+)
+
+# 7. Get conformal cutoff for test observation
 print("\nConformal prediction interval for x_o:")
-pred_interval = Score_model.interval_conformal(x_o)
-
-# Print formatted results and verify if true parameter is in the interval
-for dim in range(num_dims):
-    print(f"\nDimension {dim+1}:")
-    print(
-        f"  Interval: [{pred_interval['interval'][dim,0]:.3f}, {pred_interval['interval'][dim,1]:.3f}]"
-    )
-    print(f"  Width: {pred_interval['width'][dim]:.3f}")
-    print(f"  True theta used for x_o simulation: {test_theta.numpy()[dim]}")
-    print(
-        f"  Contains true theta: {pred_interval['interval'][dim,0] <= test_theta[dim] <= pred_interval['interval'][dim,1]}"
-    )
-
-print(f"\nNominal coverage level: {pred_interval['coverage_level']}")
-
-# 8. Verify if true parameter is in the interval
-# print(f"\nTrue theta used for x_o simulation: {test_theta.numpy()}")
-# print("Is true theta in interval for each dimension:")
-# for dim in range(num_dims):
-#    in_interval = pred_interval['interval'][dim, 0] <= test_theta[dim].item() <= pred_interval['interval'][dim, 1]
-#    print(f"  Dimension {dim+1}: {in_interval}")
+pred_cutoff = bayes_conf.predict_cutoff(x_o.reshape(1, -1).detach().numpy())
