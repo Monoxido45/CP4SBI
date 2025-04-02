@@ -92,5 +92,42 @@ class HPDScore(sbi_Scores):
         # computing posterior density for theta
         return -(np.exp(log_prob_array))
 
+# QuantileScore
+class QuantileScore(Scores):
+    def fit(self, X=None, thetas=None):
+        # setting up model for SBI package
+        if not self.is_fitted:
+            if not isinstance(X, torch.Tensor) or X.dtype != torch.float32:
+                X = torch.tensor(X, dtype=torch.float32)
+            if not isinstance(thetas, torch.Tensor) or thetas.dtype != torch.float32:
+                thetas = torch.tensor(thetas, dtype=torch.float32)
+            self.inference_obj.append_simulations(thetas, X)
+            self.inference_obj.train()
+
+        self.posterior = self.inference_obj.build_posterior()
+        return self
+    
+    def compute(self, X_calib, thetas_calib, prob = [0.025, 0.095], n_sims = 10000):
+        
+        if not isnstance(X_calib, torch.Tensor) or X_calib.dtype != torch.float32:
+            X_calib = torch.tensor(X_calib, dtype = torch.float32)
+        if not isnstance(thetas_calib, torch.Tensor) or thetas_calib.dtype != torch.float32:
+            thetas_calib = torch.tensor(thetas_calib, dtype = torch.float32)
+            
+        # computing quantiles for prob
+        par_n = thetas_calib.shape[0]
+        quantile_array = np.zeros(par_n)
+        for i in range(par_n):
+            quantiles_samples_theta = np.quantile(self.posterior.sample((n_sims,), x=X_calib[i, :]), q = prob, axis = 0)
+            
+            quantile_array[i] = (np.max(quantiles_samples_theta[:,0] - thetas_calib[i, :],
+                                        thetas_calib[i, :] - quantiles_samples_theta[:,1])
+                .detach()
+                .numpy()
+            )
+        
+        # computing quantile score posterior for theta
+        return quantile_array
+
 
 # TODO: waldo score and quantile score
