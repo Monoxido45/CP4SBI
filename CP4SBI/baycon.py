@@ -31,6 +31,7 @@ class LocartInf(BaseEstimator):
         cart_type="CART",
         split_calib=True,
         weighting=False,
+        cuda=False,
     ):
         """
         Input: (i)    sbi_score: Bayesian score of choosing. It can be specified by instantiating a Bayesian score class based on the sbi_Scores basic class.
@@ -44,6 +45,7 @@ class LocartInf(BaseEstimator):
         self.sbi_score = sbi_score(
             base_inference,
             is_fitted=is_fitted,
+            cuda=cuda,
         )
 
         # checking if base model is fitted
@@ -52,6 +54,7 @@ class LocartInf(BaseEstimator):
         self.cart_type = cart_type
         self.split_calib = split_calib
         self.weighting = weighting
+        self.cuda = cuda
 
     def fit(self, X, theta, random_seed_tree=1250, **kwargs):
         """
@@ -284,6 +287,7 @@ class BayCon:
         alpha=0.1,
         split_calib=False,
         weighting=False,
+        cuda=False,
     ):
         """
         Class for computing statistical scores.
@@ -295,10 +299,12 @@ class BayCon:
             conformal_method (str): Method for conformal prediction ('global' or 'local')
         """
         self.is_fitted = is_fitted
+        self.cuda = cuda
         self.conformal_method = conformal_method
         self.sbi_score = sbi_score(
             base_inference,
             is_fitted=is_fitted,
+            cuda=self.cuda,
         )
         self.base_inference = base_inference
         # checking if base model is fitted
@@ -312,6 +318,7 @@ class BayCon:
                 is_fitted=self.is_fitted,
                 split_calib=split_calib,
                 weighting=weighting,
+                cuda=cuda,
             )
 
     def fit(self, X, theta):

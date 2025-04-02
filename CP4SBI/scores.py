@@ -13,9 +13,10 @@ class sbi_Scores(ABC):
     ----------------------------------------------------------------
     """
 
-    def __init__(self, inference_obj, is_fitted=False):
+    def __init__(self, inference_obj, is_fitted=False, cuda=False):
         self.inference_obj = inference_obj
         self.is_fitted = is_fitted
+        self.cuda = cuda
 
     @abstractmethod
     def fit(self, X, theta):
@@ -65,15 +66,28 @@ class HPDScore(sbi_Scores):
             or thetas_calib.dtype != torch.float32
         ):
             thetas_calib = torch.tensor(thetas_calib, dtype=torch.float32)
+
+        if self.cuda:
+            X_calib = X_calib.to(device="cuda")
+            thetas_calib = thetas_calib.to(device="cuda")
+
         # obtaining posterior estimators
         par_n = thetas_calib.shape[0]
         log_prob_array = np.zeros(par_n)
         for i in range(par_n):
-            log_prob_array[i] = (
-                self.posterior.log_prob(thetas_calib[i, :], x=X_calib[i, :])
-                .detach()
-                .numpy()
-            )
+            if not self.cuda:
+                log_prob_array[i] = (
+                    self.posterior.log_prob(thetas_calib[i, :], x=X_calib[i, :])
+                    .detach()
+                    .numpy()
+                )
+            else:
+                log_prob_array[i] = (
+                    self.posterior.log_prob(thetas_calib[i, :], x=X_calib[i, :])
+                    .cpu()
+                    .detach()
+                    .numpy()
+                )
 
         # computing posterior density for theta
         return -(np.exp(log_prob_array))
