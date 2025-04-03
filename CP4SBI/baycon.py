@@ -10,6 +10,8 @@ from sklearn.tree import DecisionTreeRegressor, plot_tree
 from sklearn.ensemble import RandomForestRegressor
 from operator import itemgetter
 
+from tqdm import tqdm
+
 
 # LOCART class for derivin cutoffs
 class LocartInf(BaseEstimator):
@@ -354,16 +356,17 @@ class CDFSplit(BaseEstimator):
         # and compute the new score
         new_res = np.zeros(res.shape[0])
         i = 0
-        for X in X_calib:
+        for X in tqdm(X_calib, desc="Computting new CDF scores"):
             X = X.reshape(1, -1)
 
             if self.cuda:
                 X = X.to(device="cuda")
 
             # generating n_samples samples from the posterior
-            theta_pos = self.base_inference.posterior.sample(
-                n_samples=n_samples,
-                X=X,
+
+            theta_pos = self.sbi_score.posterior.sample(
+                (n_samples,),
+                x=X,
                 show_progress_bars=False,
             )
 
@@ -397,13 +400,13 @@ class CDFSplit(BaseEstimator):
             X_test = torch.tensor(X_test, dtype=torch.float32)
 
         # sampling from posterior
-        for X in X_test:
+        for X in tqdm(X_test, desc="Computting CDF-based cutoffs"):
             X = X.reshape(1, -1)
             if self.cuda:
                 X = X.to(device="cuda")
-            theta_pos = self.base_inference.posterior.sample(
-                n_samples,
-                X=X,
+            theta_pos = self.sbi_score.posterior.sample(
+                (n_samples,),
+                x=X,
                 show_progress_bars=False,
             )
 
@@ -462,6 +465,14 @@ class BayCon:
                 weighting=weighting,
                 cuda=cuda,
             )
+        elif self.conformal_method == "CDF":
+            self.cdf_split = CDFSplit(
+                sbi_score,
+                base_inference,
+                alpha=self.alpha,
+                is_fitted=self.is_fitted,
+                cuda=cuda,
+            )
 
     def fit(self, X, theta):
         """
@@ -473,6 +484,8 @@ class BayCon:
         """
         if self.conformal_method == "local":
             self.locart.fit(X, theta)
+        elif self.conformal_method == "CDF":
+            self.cdf_split.fit(X, theta)
         else:
             self.sbi_score.fit(X, theta)
         return self
@@ -519,8 +532,11 @@ class BayCon:
             else:
                 self.cutoff = self.locart.calib(X_calib, theta_calib)
 
+        elif self.conformal_method == "CDF":
+            self.cutoff = self.cdf_split.calib(X_calib, theta_calib)
+
         return self.cutoff
-        # TODO: HPD split/ Dheurs version
+        # TODO: LOCART + CDF split
 
     def predict_cutoff(
         self,
@@ -542,6 +558,9 @@ class BayCon:
             cutoffs = self.locart.predict_cutoff(X_test)
         elif self.conformal_method == "global":
             cutoffs = np.repeat(self.cutoff, X_test.shape[0])
+
+        elif self.conformal_method == "CDF":
+            cutoffs = self.cdf_split.predict_cutoff(X_test)
 
         # TODO: add HPD split/ Dheurs version
         return cutoffs

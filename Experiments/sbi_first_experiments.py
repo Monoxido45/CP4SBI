@@ -233,6 +233,27 @@ def compute_coverage(
     X_calib = simulator(thetas_calib)
     cuda = device == "cuda"
 
+    # CDF split
+    print("Fitting CDF split")
+    cdf_conf = BayCon(
+        sbi_score=HPDScore,
+        base_inference=inference,
+        is_fitted=True,
+        conformal_method="CDF",
+        cuda=cuda,
+        alpha=alpha,
+    )
+
+    cdf_conf.fit(
+        X=X_train,
+        theta=theta_train,
+    )
+
+    cdf_conf.calib(
+        X_calib=X_calib,
+        theta_calib=thetas_calib,
+    )
+
     # fitting LOCART
     print("Fitting LOCART")
     bayes_conf = BayCon(
@@ -274,12 +295,15 @@ def compute_coverage(
         X_calib=X_calib,
         theta_calib=thetas_calib,
     )
+
     coverage_locart = np.zeros(X_obs.shape[0])
     coverage_global = np.zeros(X_obs.shape[0])
+    coverage_cdf = np.zeros(X_obs.shape[0])
     coverage_naive = np.zeros(X_obs.shape[0])
 
     locart_cutoff = bayes_conf.predict_cutoff(X_obs.numpy())
     global_cutoff = global_conf.predict_cutoff(X_obs.numpy())
+    cdf_cutoff = cdf_conf.predict_cutoff(X_obs.numpy())
 
     i = 0
     # evaluating cutoff for each observation
@@ -339,6 +363,7 @@ def compute_coverage(
         coverage_locart[i] = np.mean(dens_test <= locart_cutoff[i])
         coverage_global[i] = np.mean(dens_test <= global_cutoff[i])
         coverage_naive[i] = np.mean(dens_test <= closest_t)
+        coverage_cdf[i] = np.mean(dens_test <= cdf_cutoff[i])
 
         i += 1
 
@@ -348,9 +373,9 @@ def compute_coverage(
             "LOCART MAD": [np.mean(np.abs(coverage_locart - (1 - alpha)))],
             "Global CP MAD": [np.mean(np.abs(coverage_global - (1 - alpha)))],
             "Naive MAD": [np.mean(np.abs(coverage_naive - (1 - alpha)))],
+            "CDF MAD": [np.mean(np.abs(coverage_cdf - (1 - alpha)))],
         }
     )
-
     return coverage_df
 
 
@@ -363,11 +388,11 @@ coverage_df = compute_coverage(
     B_train=5000,
     B_calib=5000,
     alpha=0.1,
-    num_obs=150,
+    num_obs=500,
     task="two_moons",
     device="cuda",
     random_seed=50,
-    min_samples_leaf=500,
+    min_samples_leaf=300,
     naive_samples=1000,
 )
 
