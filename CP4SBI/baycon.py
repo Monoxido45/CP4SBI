@@ -276,6 +276,148 @@ class LocartInf(BaseEstimator):
         return cutoffs
 
 
+class CDFSplit(BaseEstimator):
+    """
+    CDF split class for conformalizing bayesian credible regions.
+    Fit CDF split calibration methods for any bayesian score and base model of interest. The specification of the score
+    can be made through the usage of the basic class "sbi_Scores".
+    ----------------------------------------------------------------
+    """
+
+    def __init__(
+        self,
+        sbi_score,
+        base_inference,
+        alpha,
+        is_fitted=False,
+        cuda=False,
+    ):
+        """
+        Input: (i)    sbi_score: Bayesian score of choosing. It can be specified by instantiating a Bayesian score class based on the sbi_Scores basic class.
+               (ii)   base_inference: Base SBI inference model to be embedded in the score class.
+               (iii)  alpha: Float between 0 and 1 specifying the miscoverage level of resulting prediction region.
+               (iv)   is_fitted: Boolean indicating whether the base model is already fitted or not.
+               (v)    cuda: Boolean indicating whether to use GPU or not.
+        """
+        self.sbi_score = sbi_score(
+            base_inference,
+            is_fitted=is_fitted,
+            cuda=cuda,
+        )
+
+        # checking if base model is fitted
+        self.base_inference = self.sbi_score.inference_obj
+        self.alpha = alpha
+        self.cuda = cuda
+        self.is_fitted = is_fitted
+
+    def fit(self, X, theta):
+        """
+        Fit base model embeded in the conformal score class to the training set.
+        --------------------------------------------------------
+
+        Input: (i)    X: Training numpy feature matrix
+               (ii)   theta: Training parameter array
+
+        Output: HPDSPlit object
+        """
+        self.sbi_score.fit(X, theta)
+        return self
+
+    def calib(
+        self,
+        X_calib,
+        theta_calib,
+        n_samples=1000,
+    ):
+        """
+        Calibrate conformity score using the cumulative distribution function of the score derived by the sbi base model.
+
+        --------------------------------------------------------
+
+        Input: (i)    X_calib: Calibration numpy feature matrix
+               (ii)   theta_calib: Calibration parameter array
+               (iii)  random_seed: Random seed for Monte Carlo.
+               (iv)   n_samples: Number of samples to be used for Monte Carlo approximation.
+
+        Ouput: Vector of cutoffs.
+        """
+        res = self.sbi_score.compute(X_calib, theta_calib)
+
+        # Transform X_calib and theta_calib into tensors if they are numpy arrays
+        if isinstance(X_calib, np.ndarray):
+            X_calib = torch.tensor(X_calib, dtype=torch.float32)
+        if isinstance(theta_calib, np.ndarray):
+            theta_calib = torch.tensor(theta_calib, dtype=torch.float32)
+
+        # for each X_calib, we generate n_samples samples from the posterior
+        # and compute the new score
+        new_res = np.zeros(res.shape[0])
+        i = 0
+        for X in X_calib:
+            X = X.reshape(1, -1)
+
+            if self.cuda:
+                X = X.to(device="cuda")
+
+            # generating n_samples samples from the posterior
+            theta_pos = self.base_inference.posterior.sample(
+                n_samples=n_samples,
+                X=X,
+                show_progress_bars=False,
+            )
+
+            # computing the score for each sample
+            res_theta = self.sbi_score.compute(X, theta_pos, one_X=True)
+
+            # computing new conformal score
+            new_res[i] = np.mean(res_theta <= res[i])
+
+            i += 1
+
+        # computing cutoff on new res
+        n = new_res.shape[0]
+        self.cutoff = np.quantile(new_res, q=np.ceil((n + 1) * (1 - self.alpha)) / n)
+
+        return self.cutoff
+
+    def predict_cutoff(self, X_test, n_samples=2000):
+        """
+        Predict cutoffs for each test sample using the CDF conformal method
+        --------------------------------------------------------
+        Input: (i)    X: test numpy feature matrix
+
+        Output: Cutoffs for each test sample.
+        """
+        cutoffs = np.zeros(X_test.shape[0])
+        i = 0
+
+        # Transform X_test into a tensor if it is a numpy array
+        if isinstance(X_test, np.ndarray):
+            X_test = torch.tensor(X_test, dtype=torch.float32)
+
+        # sampling from posterior
+        for X in X_test:
+            X = X.reshape(1, -1)
+            if self.cuda:
+                X = X.to(device="cuda")
+            theta_pos = self.base_inference.posterior.sample(
+                n_samples,
+                X=X,
+                show_progress_bars=False,
+            )
+
+            # computing the quantile from theta_pos using the new cutoff
+            cutoffs[i] = np.quantile(
+                self.sbi_score.compute(X, theta_pos, one_X=True),
+                q=self.cutoff,
+            )
+
+            i += 1
+
+        return cutoffs
+
+
 # class for conformalizing bayesian credible regions
 class BayCon:
     def __init__(

@@ -31,7 +31,7 @@ class sbi_Scores(ABC):
         pass
 
     @abstractmethod
-    def compute(self, X_calib, theta_calib):
+    def compute(self, X_calib, theta_calib, one_X=False):
         """
         Compute the conformity score in the calibration set
         --------------------------------------------------------
@@ -58,7 +58,7 @@ class HPDScore(sbi_Scores):
         self.posterior = self.inference_obj.build_posterior()
         return self
 
-    def compute(self, X_calib, thetas_calib):
+    def compute(self, X_calib, thetas_calib, one_X=False):
         if not isinstance(X_calib, torch.Tensor) or X_calib.dtype != torch.float32:
             X_calib = torch.tensor(X_calib, dtype=torch.float32)
         if (
@@ -72,22 +72,34 @@ class HPDScore(sbi_Scores):
             thetas_calib = thetas_calib.to(device="cuda")
 
         # obtaining posterior estimators
-        par_n = thetas_calib.shape[0]
-        log_prob_array = np.zeros(par_n)
-        for i in range(par_n):
-            if not self.cuda:
-                log_prob_array[i] = (
-                    self.posterior.log_prob(thetas_calib[i, :], x=X_calib[i, :])
-                    .detach()
-                    .numpy()
+        if not one_X:
+            par_n = thetas_calib.shape[0]
+            log_prob_array = np.zeros(par_n)
+            for i in range(par_n):
+                if not self.cuda:
+                    log_prob_array[i] = (
+                        self.posterior.log_prob(thetas_calib[i, :], x=X_calib[i, :])
+                        .detach()
+                        .numpy()
+                    )
+                else:
+                    log_prob_array[i] = (
+                        self.posterior.log_prob(thetas_calib[i, :], x=X_calib[i, :])
+                        .cpu()
+                        .detach()
+                        .numpy()
+                    )
+        else:
+            # computing log_prob for only one X
+            log_prob_array = (
+                self.posterior.log_prob_batched(
+                    thetas_calib,
+                    x=X_calib.reshape(1, -1),
                 )
-            else:
-                log_prob_array[i] = (
-                    self.posterior.log_prob(thetas_calib[i, :], x=X_calib[i, :])
-                    .cpu()
-                    .detach()
-                    .numpy()
-                )
+                .cpu()
+                .detach()
+                .numpy()
+            )
 
         # computing posterior density for theta
         return -(np.exp(log_prob_array))
