@@ -10,6 +10,7 @@ import numpy as np
 # for benchmarking
 import sbibm
 from copy import deepcopy
+import pandas as pd
 
 # Example usage:
 num_dims = 3
@@ -84,6 +85,10 @@ prior_NPE = BoxUniform(low=-1 * torch.ones(2), high=1 * torch.ones(2), device="c
 observation = task.get_observation(num_observation=1)
 post_samples = task.get_reference_posterior_samples(num_observation=1)
 
+post_samples_2 = task._sample_reference_posterior(
+    num_samples=500, num_observation=20, observation=observation
+)
+
 # training NPE with few samples
 thetas = prior(num_samples=2000)
 X_train = simulator(thetas)
@@ -139,7 +144,7 @@ global_conf.calib(
 
 # Naive HPD for comparison
 # generating from posterior
-naive_samples = 5000
+naive_samples = 1000
 posterior = deepcopy(bayes_conf.locart.sbi_score.posterior)
 samples = posterior.sample(
     (naive_samples,),
@@ -185,3 +190,185 @@ naive_coverage = np.mean(dens_test <= closest_t)
 print(f"LOCART Coverage: {locart_coverage}")
 print(f"Global Coverage: {global_coverage}")
 print(f"Naive Coverage: {naive_coverage}")
+
+
+###### Computing coverage for each approach across several X
+# setting B = 5000
+def compute_coverage(
+    prior_NPE,
+    B_train=5000,
+    B_calib=5000,
+    alpha=0.1,
+    num_obs=500,
+    task="two_moons",
+    device="cuda",
+    random_seed=0,
+    min_samples_leaf=300,
+    naive_samples=1000,
+    num_p_samples=1000,
+):
+    # fixing task
+    task = sbibm.get_task("two_moons")
+    prior = task.get_prior()
+    simulator = task.get_simulator()
+
+    # setting seet
+    torch.manual_seed(random_seed)
+    torch.cuda.manual_seed(random_seed)
+
+    # simulating random observations for computing coverage
+    thetas_obs = prior(num_samples=num_obs)
+    X_obs = simulator(thetas_obs)
+
+    # training samples
+    theta_train = prior(num_samples=B_train)
+    X_train = simulator(theta_train)
+
+    # fitting NPE
+    inference = NPE(prior_NPE, device=device)
+    inference.append_simulations(theta_train, X_train).train()
+
+    # training conformal methods
+    thetas_calib = prior(num_samples=B_calib)
+    X_calib = simulator(thetas_calib)
+    cuda = device == "cuda"
+
+    # fitting LOCART
+    print("Fitting LOCART")
+    bayes_conf = BayCon(
+        sbi_score=HPDScore,
+        base_inference=inference,
+        is_fitted=True,
+        conformal_method="local",
+        cuda=cuda,
+        alpha=alpha,
+    )
+    bayes_conf.fit(
+        X=X_train,
+        theta=theta_train,
+    )
+
+    bayes_conf.calib(
+        X_calib=X_calib,
+        theta_calib=thetas_calib,
+        locart_kwargs={"min_samples_leaf": min_samples_leaf},
+    )
+
+    # global
+    print("Fitting global conformal")
+    global_conf = BayCon(
+        sbi_score=HPDScore,
+        base_inference=inference,
+        is_fitted=True,
+        conformal_method="global",
+        cuda=cuda,
+        alpha=alpha,
+    )
+
+    global_conf.fit(
+        X=X_train,
+        theta=theta_train,
+    )
+
+    global_conf.calib(
+        X_calib=X_calib,
+        theta_calib=thetas_calib,
+    )
+    coverage_locart = np.zeros(X_obs.shape[0])
+    coverage_global = np.zeros(X_obs.shape[0])
+    coverage_naive = np.zeros(X_obs.shape[0])
+
+    locart_cutoff = bayes_conf.predict_cutoff(X_obs.numpy())
+    global_cutoff = global_conf.predict_cutoff(X_obs.numpy())
+
+    i = 0
+    # evaluating cutoff for each observation
+    for X in tqdm(X_obs, desc="Computing coverage across observations"):
+        post_samples = task._sample_reference_posterior(
+            num_samples=num_p_samples,
+            num_observation=i,
+            observation=X.reshape(1, -1),
+        )
+
+        # computing naive HPD cutoff
+        post_estim = deepcopy(bayes_conf.locart.sbi_score.posterior)
+
+        samples = post_estim.sample(
+            (naive_samples,),
+            x=X.reshape(1, -1).to(device="cuda"),
+            show_progress_bars=False,
+        )
+
+        conf_scores = -np.exp(
+            post_estim.log_prob_batched(
+                samples,
+                x=X.reshape(1, -1).to(device="cuda"),
+            )
+            .cpu()
+            .numpy()
+        )
+
+        # picking large grid between maximum and minimum densities
+        t_grid = np.arange(
+            np.min(conf_scores),
+            np.max(conf_scores),
+            0.005,
+        )
+        target_coverage = 1 - alpha
+
+        # computing MC integral for all t_grid
+        coverage_array = np.zeros(t_grid.shape[0])
+        for t in t_grid:
+            coverage_array[t_grid == t] = np.mean(conf_scores <= t)
+
+        closest_t_index = np.argmin(np.abs(coverage_array - target_coverage))
+        # finally, finding the naive cutoff
+        closest_t = t_grid[closest_t_index]
+
+        # computing density for each posterior observation
+        dens_test = -np.exp(
+            post_estim.log_prob_batched(
+                post_samples.to(device=device),
+                x=X.reshape(1, -1).to(device=device),
+            )
+            .cpu()
+            .numpy()
+        )
+
+        # computing coverage
+        coverage_locart[i] = np.mean(dens_test <= locart_cutoff[i])
+        coverage_global[i] = np.mean(dens_test <= global_cutoff[i])
+        coverage_naive[i] = np.mean(dens_test <= closest_t)
+
+        i += 1
+
+    # Creating a pandas DataFrame with the mean coverage values
+    coverage_df = pd.DataFrame(
+        {
+            "LOCART MAD": [np.mean(np.abs(coverage_locart - (1 - alpha)))],
+            "Global CP MAD": [np.mean(np.abs(coverage_global - (1 - alpha)))],
+            "Naive MAD": [np.mean(np.abs(coverage_naive - (1 - alpha)))],
+        }
+    )
+
+    return coverage_df
+
+
+# defining prior for NPE
+prior_NPE = BoxUniform(low=-1 * torch.ones(2), high=1 * torch.ones(2), device="cuda")
+
+# Running the function
+coverage_df = compute_coverage(
+    prior_NPE,
+    B_train=5000,
+    B_calib=5000,
+    alpha=0.1,
+    num_obs=150,
+    task="two_moons",
+    device="cuda",
+    random_seed=50,
+    min_samples_leaf=500,
+    naive_samples=1000,
+)
+
+coverage_df
