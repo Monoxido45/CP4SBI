@@ -363,7 +363,6 @@ class CDFSplit(BaseEstimator):
                 X = X.to(device="cuda")
 
             # generating n_samples samples from the posterior
-
             theta_pos = self.sbi_score.posterior.sample(
                 (n_samples,),
                 x=X,
