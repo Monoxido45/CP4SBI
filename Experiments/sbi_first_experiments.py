@@ -196,8 +196,8 @@ print(f"Naive Coverage: {naive_coverage}")
 # setting B = 5000
 def compute_coverage(
     prior_NPE,
-    B_train=5000,
-    B_calib=5000,
+    B=5000,
+    prop_calib=0.2,
     alpha=0.1,
     num_obs=500,
     task="two_moons",
@@ -219,6 +219,10 @@ def compute_coverage(
     # simulating random observations for computing coverage
     thetas_obs = prior(num_samples=num_obs)
     X_obs = simulator(thetas_obs)
+
+    # splitting simulation budget
+    B_train = int(B * (1 - prop_calib))
+    B_calib = int(B * prop_calib)
 
     # training samples
     theta_train = prior(num_samples=B_train)
@@ -385,8 +389,6 @@ prior_NPE = BoxUniform(low=-1 * torch.ones(2), high=1 * torch.ones(2), device="c
 # Running the function
 coverage_df = compute_coverage(
     prior_NPE,
-    B_train=5000,
-    B_calib=5000,
     alpha=0.1,
     num_obs=500,
     task="two_moons",
