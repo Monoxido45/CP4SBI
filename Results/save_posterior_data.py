@@ -73,6 +73,7 @@ for X in tqdm(X_obs, desc="Generating samples for each X"):
         or task.name == "gaussian_mixture"
         or task.name == "slcp"
         or task.name == "sir"
+        or task.name == "lotka_volterra"
     ):
         post_dict[X.reshape(1, -1)] = task._sample_reference_posterior(
             num_samples=n_samples,

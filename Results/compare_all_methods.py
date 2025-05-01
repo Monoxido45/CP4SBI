@@ -52,7 +52,7 @@ parser.add_argument(
     "--B",
     "-B",
     help="int for simulation budget",
-    default=1000,
+    default=10000,
     type=int,
 )
 parser.add_argument(
@@ -88,16 +88,19 @@ if task.name == "two_moons":
     prior_NPE = BoxUniform(
         low=-1 * torch.ones(2),
         high=1 * torch.ones(2),
+        device=device,
     )
 elif task.name == "gaussian_linear_uniform":
     prior_NPE = BoxUniform(
         low=-1 * torch.ones(10),
         high=1 * torch.ones(10),
+        device=device,
     )
 elif task.name == "slcp":
     prior_NPE = BoxUniform(
         low=-3 * torch.ones(5),
         high=3 * torch.ones(5),
+        device=device,
     )
 elif task.name == "gaussian_linear":
     prior_params = {
@@ -106,20 +109,26 @@ elif task.name == "gaussian_linear":
             task.prior_scale * torch.eye(task.dim_parameters)
         ),
     }
-    prior_dist = MultivariateNormal(**prior_params, validate_args=False)
+    prior_dist = MultivariateNormal(
+        **prior_params,
+        validate_args=False,
+    ).to(device=device)
     prior_NPE, _, _ = process_prior(prior_dist)
+    prior_NPE = prior_NPE.to(device=device)
 elif task.name == "gaussian_mixture":
     prior_NPE = BoxUniform(
         low=-10 * torch.ones(task.dim_parameters),
         high=10 * torch.ones(task.dim_parameters),
+        device=device,
     )
 elif task.name == "sir":
     prior_params = {
         "loc": torch.tensor([math.log(0.4), math.log(0.125)]),
         "scale": torch.tensor([0.5, 0.2]),
     }
-    prior_dist = LogNormal(**prior_params, validate_args=False)
+    prior_dist = LogNormal(**prior_params, validate_args=False).to(device=device)
     prior_NPE, _, _ = process_prior(prior_dist)
+    prior_NPE = prior_NPE.to(device=device)
 elif task.name == "lotka_volterra":
     mu_p1 = -0.125
     mu_p2 = -3.0
@@ -128,8 +137,9 @@ elif task.name == "lotka_volterra":
         "loc": torch.tensor([mu_p1, mu_p2, mu_p1, mu_p2]),
         "scale": torch.tensor([sigma_p, sigma_p, sigma_p, sigma_p]),
     }
-    prior_dist = LogNormal(**prior_params, validate_args=False)
+    prior_dist = LogNormal(**prior_params, validate_args=False).to(device=device)
     prior_NPE, _, _ = process_prior(prior_dist)
+    prior_NPE = prior_NPE.to(device=device)
 
 # unused simulators
 # elif task.name == "bernoulli_glm":
@@ -155,7 +165,7 @@ def compute_coverage(
     task_name="two_moons",
     device="cuda",
     random_seed=0,
-    min_samples_leaf=150,
+    min_samples_leaf=300,
     naive_samples=1000,
 ):
     # fixing task
@@ -166,10 +176,6 @@ def compute_coverage(
     # setting seet
     torch.manual_seed(random_seed)
     torch.cuda.manual_seed(random_seed)
-
-    # simulating random observations for computing coverage
-    thetas_obs = prior(num_samples=num_obs)
-    X_obs = simulator(thetas_obs)
 
     # splitting simulation budget
     B_train = int(B * (1 - prop_calib))
@@ -251,14 +257,10 @@ def compute_coverage(
         theta_calib=thetas_calib,
     )
 
-    coverage_locart = np.zeros(X_obs.shape[0])
-    coverage_global = np.zeros(X_obs.shape[0])
-    coverage_cdf = np.zeros(X_obs.shape[0])
-    coverage_naive = np.zeros(X_obs.shape[0])
-
-    locart_cutoff = bayes_conf.predict_cutoff(X_obs.numpy())
-    global_cutoff = global_conf.predict_cutoff(X_obs.numpy())
-    cdf_cutoff = cdf_conf.predict_cutoff(X_obs.numpy())
+    coverage_locart = np.zeros(num_obs)
+    coverage_global = np.zeros(num_obs)
+    coverage_cdf = np.zeros(num_obs)
+    coverage_naive = np.zeros(num_obs)
 
     # Load the dictionary from the pickle file
     posterior_data_path = (
@@ -266,6 +268,11 @@ def compute_coverage(
     )
     with open(posterior_data_path, "rb") as f:
         X_dict = pickle.load(f)
+
+    X_obs = torch.cat(list(X_dict.keys())).numpy()
+    locart_cutoff = bayes_conf.predict_cutoff(X_obs)
+    global_cutoff = global_conf.predict_cutoff(X_obs)
+    cdf_cutoff = cdf_conf.predict_cutoff(X_obs)
 
     i = 0
     dict_keys = list(X_dict.keys())
@@ -358,7 +365,7 @@ def compute_coverage_repeated(
     coverage_results = []
 
     # Loop through each seed and compute coverage
-    for seed in seeds:
+    for seed in tqdm(seeds, desc="Computing coverage for each seed"):
         coverage_df = compute_coverage(
             prior_NPE=prior_NPE,
             B=B,
@@ -387,7 +394,7 @@ all_coverage_df = compute_coverage_repeated(
     task_name=task_name,
     device=device,
     central_seed=seed,
-    min_samples_leaf=150,
+    min_samples_leaf=300,
     naive_samples=1000,
     n_rep=n_rep,
 )
