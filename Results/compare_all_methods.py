@@ -104,17 +104,16 @@ elif task.name == "slcp":
     )
 elif task.name == "gaussian_linear":
     prior_params = {
-        "loc": torch.zeros((task.dim_parameters,)),
+        "loc": torch.zeros((task.dim_parameters,), device=device),
         "precision_matrix": torch.inverse(
-            task.prior_scale * torch.eye(task.dim_parameters)
+            0.1 * torch.eye(task.dim_parameters, device=device)
         ),
     }
     prior_dist = MultivariateNormal(
         **prior_params,
         validate_args=False,
-    ).to(device=device)
+    )
     prior_NPE, _, _ = process_prior(prior_dist)
-    prior_NPE = prior_NPE.to(device=device)
 elif task.name == "gaussian_mixture":
     prior_NPE = BoxUniform(
         low=-10 * torch.ones(task.dim_parameters),
