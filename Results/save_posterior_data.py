@@ -59,8 +59,17 @@ if not os.path.exists(save_dir):
 
 # Dictionary to save the posterior samples
 post_dict = {}
-i = 0
-for X in tqdm(X_obs, desc="Generating samples for each X"):
+# Check if a checkpoint exists and load it
+checkpoint_path = os.path.join(save_dir, f"{task.name}_checkpoint.pkl")
+if os.path.exists(checkpoint_path):
+    with open(checkpoint_path, "rb") as checkpoint_file:
+        post_dict = pickle.load(checkpoint_file)
+    i = len(post_dict)  # Start from the first empty entry
+else:
+    i = 0
+
+# Generate samples for each X
+for X in tqdm(X_obs[i:], desc="Generating samples for each X"):
     if (
         task.name == "gaussian_linear_uniform"
         or task.name == "gaussian_linear"
@@ -80,6 +89,14 @@ for X in tqdm(X_obs, desc="Generating samples for each X"):
             observation=X.reshape(1, -1),
         )
     i += 1
+    # Save a checkpoint after processing each X
+    with open(checkpoint_path, "wb") as checkpoint_file:
+        pickle.dump(post_dict, checkpoint_file)
+
+# saving final results
+# Delete the checkpoint file before saving the final results
+if os.path.exists(checkpoint_path):
+    os.remove(checkpoint_path)
 
 # Save the posterior samples to a pickle file
 with open(os.path.join(save_dir, f"{task.name}_posterior_samples.pkl"), "wb") as f:
