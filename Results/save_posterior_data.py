@@ -1,16 +1,10 @@
 import argparse
 import torch
-from sbi.utils import BoxUniform
 from tqdm import tqdm
 import numpy as np
 import sbibm
-import pandas as pd
 import os
 import pickle
-from torch.distributions.multivariate_normal import MultivariateNormal
-from torch.distributions.log_normal import LogNormal
-import math
-from sbi.utils.user_input_checks import process_prior
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--task", "-d", help="string for SBI task", default="two_moons")
