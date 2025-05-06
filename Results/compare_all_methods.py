@@ -363,8 +363,20 @@ def compute_coverage_repeated(
     # Initialize an empty list to store coverage results
     coverage_results = []
 
-    # Loop through each seed and compute coverage
-    for seed in tqdm(seeds, desc="Computing coverage for each seed"):
+    # Initialize a list to store checkpoints
+    checkpoint_path = os.path.join(original_path, "Results", "MAE_results")
+    os.makedirs(checkpoint_path, exist_ok=True)
+    checkpoint_file = os.path.join(checkpoint_path, f"{task_name}_checkpoints.pkl")
+
+    # Check if the checkpoint file exists
+    if os.path.exists(checkpoint_file):
+        with open(checkpoint_file, "rb") as f:
+            coverage_results = pickle.load(f)
+
+    # Start the loop from the length of the checkpoint list
+    start_index = len(coverage_results)
+    # Adjust the loop to start from the start_index
+    for i, seed in enumerate(tqdm(seeds[start_index:], desc="Computing coverage for each seed"), start=start_index):
         coverage_df = compute_coverage(
             prior_NPE=prior_NPE,
             B=B,
@@ -379,6 +391,9 @@ def compute_coverage_repeated(
         )
         coverage_results.append(coverage_df)
 
+        with open(checkpoint_file, "wb") as f:
+            pickle.dump(coverage_results, f)
+    
     # Combine results into a single DataFrame
     combined_coverage_df = pd.concat(coverage_results, ignore_index=True)
     return combined_coverage_df
@@ -414,3 +429,8 @@ summary_stats = summary_stats.drop(index="std")  # Drop standard deviation row
 # Save the summary statistics to a CSV file
 summary_csv_path = os.path.join(mae_results_path, f"{task_name}_coverage_summary.csv")
 summary_stats.to_csv(summary_csv_path)
+
+# Removing all checkpoints
+checkpoint_file = os.path.join(mae_results_path, f"{task_name}_checkpoints.pkl")
+if os.path.exists(checkpoint_file):
+    os.remove(checkpoint_file)
