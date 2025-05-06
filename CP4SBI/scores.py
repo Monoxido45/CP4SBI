@@ -105,6 +105,105 @@ class HPDScore(sbi_Scores):
         return -(np.exp(log_prob_array))
 
 
+# Waldo score
+class WALDOScore(sbi_Scores):
+    def fit(self, X=None, thetas=None):
+        # setting up model for SBI package
+        if not self.is_fitted:
+            if not isinstance(X, torch.Tensor) or X.dtype != torch.float32:
+                X = torch.tensor(X, dtype=torch.float32)
+            if not isinstance(thetas, torch.Tensor) or thetas.dtype != torch.float32:
+                thetas = torch.tensor(thetas, dtype=torch.float32)
+            self.inference_obj.append_simulations(thetas, X)
+            self.inference_obj.train()
+
+        self.posterior = self.inference_obj.build_posterior()
+        return self
+
+    def compute(self, X_calib, thetas_calib, one_X=False, B = 1000):
+        if not isinstance(X_calib, torch.Tensor) or X_calib.dtype != torch.float32:
+            X_calib = torch.tensor(X_calib, dtype=torch.float32)
+        if (
+            not isinstance(thetas_calib, torch.Tensor)
+            or thetas_calib.dtype != torch.float32
+        ):
+            thetas_calib = torch.tensor(thetas_calib, dtype=torch.float32)
+
+        if self.cuda:
+            X_calib = X_calib.to(device="cuda")
+            thetas_calib = thetas_calib.to(device="cuda")
+
+        # simulating samples for each X
+        if not one_X:
+            par_n = thetas_calib.shape[0]
+            waldo_array = np.zeros(par_n)
+            for i in range(par_n):
+                if not self.cuda:
+                    sample_generated = (
+                        self.posterior.sample(
+                        (B,),
+                        x=X_calib[i, :],
+                    )
+                    .detach()
+                    .numpy()
+                    )
+                else:
+                    sample_generated = (
+                        self.posterior.sample(
+                        (B,),
+                        x=X_calib[i, :],
+                    )
+                    .cpu()
+                    .detach()
+                    .numpy()
+                    )
+
+                # computing mean and covariance matrix
+                mean_array = np.mean(sample_generated, axis=0)
+                covariance_matrix = np.cov(sample_generated, rowvar=False)
+
+                if mean_array.shape[0] > 1:
+                    waldo_array[i] = (
+                        (mean_array - thetas_calib[i, :]).transpose()
+                        @ np.linalg.inv(covariance_matrix)
+                        @ (mean_array - thetas_calib[i, :])
+                    )
+                else:
+                    waldo_array[i] = (mean_array - thetas_calib[i]) ** 2 / (covariance_matrix)
+
+        else:
+            par_n = thetas_calib.shape[0]
+            waldo_array = np.zeros(par_n)
+
+            # computing log_prob for only one X
+            sample_generated = (
+                self.posterior.sample(
+                    (B,),
+                    x=X_calib,
+                )
+                .cpu()
+                .detach()
+                .numpy()
+            )
+
+            # computing mean and covariance matrix
+            mean_array = np.mean(sample_generated, axis=0)
+            covariance_matrix = np.cov(sample_generated, rowvar=False)
+
+            for i in range(par_n):
+                if mean_array.shape[0] > 1:
+                    waldo_array[i] = (
+                        (mean_array - thetas_calib[i, :]).transpose()
+                        @ np.linalg.inv(covariance_matrix)
+                        @ (mean_array - thetas_calib[i, :])
+                    )
+                else:
+                    waldo_array[i] = (mean_array - thetas_calib[i]) ** 2 / (covariance_matrix)
+
+        # computing posterior density for theta
+        return waldo_array
+
+
 # QuantileScore
 class QuantileScore(sbi_Scores):
     def fit(self, X=None, thetas=None):
