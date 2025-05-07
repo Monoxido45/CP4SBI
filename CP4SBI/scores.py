@@ -143,6 +143,7 @@ class WALDOScore(sbi_Scores):
                         self.posterior.sample(
                         (B,),
                         x=X_calib[i, :],
+                        show_progress_bars=False,
                     )
                     .detach()
                     .numpy()
@@ -152,6 +153,7 @@ class WALDOScore(sbi_Scores):
                         self.posterior.sample(
                         (B,),
                         x=X_calib[i, :],
+                        show_progress_bars=False,
                     )
                     .cpu()
                     .detach()
@@ -163,13 +165,15 @@ class WALDOScore(sbi_Scores):
                 covariance_matrix = np.cov(sample_generated, rowvar=False)
 
                 if mean_array.shape[0] > 1:
+                    theta_fixed = thetas_calib[i, :].cpu().numpy()
                     waldo_array[i] = (
-                        (mean_array - thetas_calib[i, :]).transpose()
+                        (mean_array - theta_fixed).transpose()
                         @ np.linalg.inv(covariance_matrix)
-                        @ (mean_array - thetas_calib[i, :])
+                        @ (mean_array - theta_fixed)
                     )
                 else:
-                    waldo_array[i] = (mean_array - thetas_calib[i]) ** 2 / (covariance_matrix)
+                    theta_fixed = thetas_calib[i].cpu().numpy()
+                    waldo_array[i] = (mean_array - theta_fixed) ** 2 / (covariance_matrix)
 
         else:
             par_n = thetas_calib.shape[0]
@@ -180,6 +184,7 @@ class WALDOScore(sbi_Scores):
                 self.posterior.sample(
                     (B,),
                     x=X_calib,
+                    show_progress_bars=False,
                 )
                 .cpu()
                 .detach()
@@ -189,16 +194,19 @@ class WALDOScore(sbi_Scores):
             # computing mean and covariance matrix
             mean_array = np.mean(sample_generated, axis=0)
             covariance_matrix = np.cov(sample_generated, rowvar=False)
+            inv_matrix = np.linalg.inv(covariance_matrix)
 
             for i in range(par_n):
                 if mean_array.shape[0] > 1:
+                    theta_fixed = thetas_calib[i, :].cpu().numpy()
                     waldo_array[i] = (
-                        (mean_array - thetas_calib[i, :]).transpose()
-                        @ np.linalg.inv(covariance_matrix)
-                        @ (mean_array - thetas_calib[i, :])
+                        (mean_array - theta_fixed).transpose()
+                        @ inv_matrix
+                        @ (mean_array - theta_fixed)
                     )
                 else:
-                    waldo_array[i] = (mean_array - thetas_calib[i]) ** 2 / (covariance_matrix)
+                    theta_fixed = thetas_calib[i].cpu().numpy()
+                    waldo_array[i] = (mean_array - theta_fixed) ** 2 / (covariance_matrix)
 
         # computing posterior density for theta
         return waldo_array
