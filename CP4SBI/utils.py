@@ -52,6 +52,7 @@ def naive_method(
                 show_progress_bars=False,
             )
             .cpu()
+            .detach()
             .numpy()   
         )
 

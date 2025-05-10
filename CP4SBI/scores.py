@@ -138,21 +138,10 @@ class WALDOScore(sbi_Scores):
             par_n = thetas_calib.shape[0]
             waldo_array = np.zeros(par_n)
             for i in range(par_n):
-                if not self.cuda:
-                    sample_generated = (
+                sample_generated = (
                         self.posterior.sample(
                         (B,),
-                        x=X_calib[i, :],
-                        show_progress_bars=False,
-                    )
-                    .detach()
-                    .numpy()
-                    )
-                else:
-                    sample_generated = (
-                        self.posterior.sample(
-                        (B,),
-                        x=X_calib[i, :],
+                        x=X_calib[i, :].reshape(1, -1),
                         show_progress_bars=False,
                     )
                     .cpu()
@@ -183,7 +172,7 @@ class WALDOScore(sbi_Scores):
             sample_generated = (
                 self.posterior.sample(
                     (B,),
-                    x=X_calib,
+                    x=X_calib.reshape(1, -1),
                     show_progress_bars=False,
                 )
                 .cpu()
