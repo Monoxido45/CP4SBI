@@ -5,6 +5,7 @@ from sbi.inference import NPE
 from CP4SBI.baycon import BayCon
 from CP4SBI.scores import HPDScore, WALDOScore
 from sbi.utils.user_input_checks import process_prior
+from sbi.utils import MultipleIndependent
 from CP4SBI.utils import naive_method
 
 # for benchmarking
@@ -58,6 +59,14 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "--X_list",
+    "-X_list",
+    help="string indicating whether to use X_list or not",
+    default="False",
+    type=str,
+)
+
+parser.add_argument(
     "--B",
     "-B",
     help="int for simulation budget",
@@ -72,6 +81,7 @@ parser.add_argument(
     type=int,
 )
 
+original_path = os.getcwd()
 if __name__ == "__main__":
     args = parser.parse_args()  # get arguments from command line
 else:
@@ -84,10 +94,29 @@ p_calib = args.prop_calib
 n_rep = args.n_rep
 device = args.device
 score_type = args.score
+X_str = (args.X_list == "True")
+
+if X_str:
+    # Load the X_list pickle file from the X_data folder
+    x_data_path = os.path.join(original_path, 
+                               "Results/X_data", 
+                               f"{task_name}_X_samples.pkl")
+    with open(x_data_path, "rb") as f:
+        X_list = pickle.load(f)
+    
+    # Load the X_list pickle file from the X_data folder
+    theta_data_path = os.path.join(original_path, 
+                               "Results/X_data", 
+                               f"{task_name}_theta_samples.pkl")
+    with open(theta_data_path, "rb") as f:
+        theta_list = pickle.load(f)
+    
+    X_dict = {"X": X_list, "theta": theta_list}
+else:
+    X_dict = None
 
 # Set the random seed for reproducibility
 alpha = 0.1
-original_path = os.getcwd()
 
 # Load the SBI task, simulator, and prior
 task = sbibm.get_task(task_name)
@@ -131,24 +160,28 @@ elif task.name == "gaussian_mixture":
         device=device,
     )
 elif task.name == "sir":
-    prior_params = {
-        "loc": torch.tensor([math.log(0.4), math.log(0.125)]),
-        "scale": torch.tensor([0.5, 0.2]),
-    }
-    prior_dist = LogNormal(**prior_params, validate_args=False).to(device=device)
+    prior_list = [
+        LogNormal(loc = torch.tensor([math.log(0.4)], device = device),
+                  scale = torch.tensor([0.5], device = device),
+                  validate_args = False,
+                  ),
+        LogNormal(loc = torch.tensor([math.log(0.125)], device = device),
+                  scale = torch.tensor([0.2], device = device),
+                  validate_args = False,
+                  ),   
+    ]
+    prior_dist = MultipleIndependent(prior_list, validate_args=False)
     prior_NPE, _, _ = process_prior(prior_dist)
-    prior_NPE = prior_NPE.to(device=device)
 elif task.name == "lotka_volterra":
     mu_p1 = -0.125
     mu_p2 = -3.0
     sigma_p = 0.5
     prior_params = {
-        "loc": torch.tensor([mu_p1, mu_p2, mu_p1, mu_p2]),
-        "scale": torch.tensor([sigma_p, sigma_p, sigma_p, sigma_p]),
+        "loc": torch.tensor([mu_p1, mu_p2, mu_p1, mu_p2], device=device),
+        "scale": torch.tensor([sigma_p, sigma_p, sigma_p, sigma_p], device=device),
     }
-    prior_dist = LogNormal(**prior_params, validate_args=False).to(device=device)
+    prior_dist = LogNormal(**prior_params, validate_args=False)
     prior_NPE, _, _ = process_prior(prior_dist)
-    prior_NPE = prior_NPE.to(device=device)
 
 # unused simulators
 # elif task.name == "bernoulli_glm":
@@ -168,6 +201,8 @@ elif task.name == "lotka_volterra":
 def compute_coverage(
     prior_NPE,
     score_type,
+    X = None,
+    theta = None,
     B=5000,
     prop_calib=0.2,
     alpha=0.1,
@@ -187,21 +222,41 @@ def compute_coverage(
     torch.manual_seed(random_seed)
     torch.cuda.manual_seed(random_seed)
 
+    # checking if X_list is None or not
     # splitting simulation budget
     B_train = int(B * (1 - prop_calib))
     B_calib = int(B * prop_calib)
 
-    # training samples
-    theta_train = prior(num_samples=B_train)
-    X_train = simulator(theta_train)
+    if X is None and theta is None:
+        # training samples
+        theta_train = prior(num_samples=B_train)
+        X_train = simulator(theta_train)
 
-    # fitting NPE
-    inference = NPE(prior_NPE, device=device)
-    inference.append_simulations(theta_train, X_train).train()
+        # fitting NPE
+        inference = NPE(prior_NPE, device=device)
+        inference.append_simulations(theta_train, X_train).train()
 
-    # training conformal methods
-    thetas_calib = prior(num_samples=B_calib)
-    X_calib = simulator(thetas_calib)
+        # training conformal methods
+        thetas_calib = prior(num_samples=B_calib)
+        X_calib = simulator(thetas_calib)
+    else:
+        # splitting X
+        indices = torch.randperm(X.shape[0])
+        train_indices = indices[:B_train]
+        calib_indices = indices[B_train:]
+
+        X_train = X[train_indices]
+        X_calib = X[calib_indices]
+
+        # splitting theta
+        theta_train = theta[train_indices]
+        thetas_calib = theta[calib_indices]
+
+         # fitting NPE
+        inference = NPE(prior_NPE, device=device)
+        inference.append_simulations(theta_train, 
+                                     X_train).train()
+
     cuda = device == "cuda"
 
     # checking score type
@@ -368,6 +423,7 @@ def compute_coverage(
 def compute_coverage_repeated(
     prior_NPE,
     score_type,
+    X_list = None,
     B=5000,
     prop_calib=0.2,
     alpha=0.1,
@@ -399,9 +455,19 @@ def compute_coverage_repeated(
     start_index = len(coverage_results)
     # Adjust the loop to start from the start_index
     for i, seed in enumerate(tqdm(seeds[start_index:], desc="Computing coverage for each seed"), start=start_index):
+        # checking X_list
+        if X_list is not None:
+            X = X_list["X"][i]
+            theta = X_list["theta"][i]
+        else:
+            X = None
+            theta = None
+
         coverage_df = compute_coverage(
             score_type=score_type,
             prior_NPE=prior_NPE,
+            X = X,
+            theta = theta,
             B=B,
             prop_calib=prop_calib,
             alpha=alpha,
@@ -425,6 +491,7 @@ def compute_coverage_repeated(
 all_coverage_df = compute_coverage_repeated(
     score_type=score_type,
     prior_NPE=prior_NPE,
+    X_list = X_dict,
     B=B,
     prop_calib=p_calib,
     alpha=alpha,
