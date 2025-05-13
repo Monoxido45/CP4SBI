@@ -27,7 +27,14 @@ import pickle
 import os
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--task", "-d", help="string for SBI task", default="two_moons")
+parser.add_argument(
+    "--task", 
+    "-d", 
+    help="string for SBI task", 
+    default="two_moons",
+    type=str,
+    )
+
 parser.add_argument(
     "--seed",
     "-s",
@@ -35,6 +42,7 @@ parser.add_argument(
     default=45,
     type=int,
 )
+
 parser.add_argument(
     "--score",
     "-sc",
@@ -73,6 +81,7 @@ parser.add_argument(
     default=10000,
     type=int,
 )
+
 parser.add_argument(
     "--prop_calib",
     "-p_calib",
@@ -80,6 +89,7 @@ parser.add_argument(
     default=0.2,
     type=int,
 )
+
 
 original_path = os.getcwd()
 if __name__ == "__main__":
@@ -356,13 +366,25 @@ def compute_coverage(
 
         if score_type == "HPD":
             # computing naive cutoff
-            closest_t = naive_method(
+            if task_name == "sir":
+                closest_t = naive_method(
                 post_estim,
                 X=X,
                 alpha = alpha,
                 score_type=score_type,
                 device=device,
-            )
+                n_grid = 1000,
+                B_naive = naive_samples,
+                )
+            else:
+                closest_t = naive_method(
+                post_estim,
+                X=X,
+                alpha = alpha,
+                score_type=score_type,
+                device=device,
+                B_naive = naive_samples,
+                )
 
             # computing scores
             conf_scores = -np.exp(
@@ -375,14 +397,24 @@ def compute_coverage(
             )
         elif score_type == "WALDO":
             # computing naive cutoff
-            closest_t, mean_array, inv_matrix = naive_method(
+            if task_name == "sir":
+                closest_t, mean_array, inv_matrix = naive_method(
+                X=X,
+                alpha = alpha,
+                score_type=score_type,
+                device=device,
+                B_naive = naive_samples,
+                n_grid = 700,
+                )
+            else:
+                closest_t, mean_array, inv_matrix = naive_method(
                 post_estim,
                 X=X,
                 alpha = alpha,
                 score_type=score_type,
                 device=device,
                 B_naive = naive_samples,
-            )
+                )
 
             # computing scores
             conf_scores = np.zeros(post_samples.shape[0])

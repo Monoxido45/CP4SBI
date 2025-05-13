@@ -10,6 +10,7 @@ def naive_method(
         device = "cuda",
         B_waldo = 1000,
         grid_step = 0.005,
+        n_grid = None,
         ):
     """
     Naive credible sets based on the posterior distribution.
@@ -79,11 +80,18 @@ def naive_method(
                 conf_scores[i] = (mean_array - samples[i]) ** 2 / (covariance_matrix)
     
     # picking large grid between maximum and minimum densities
-    t_grid = np.arange(
+    if n_grid is None:
+        t_grid = np.arange(
         np.min(conf_scores),
         np.max(conf_scores),
         grid_step,
     )
+    else:
+        t_grid = np.linspace(
+            np.min(conf_scores),
+            np.max(conf_scores),
+            num = n_grid,
+        )
     target_coverage = 1 - alpha
 
     # computing MC integral for all t_grid
