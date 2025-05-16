@@ -1,20 +1,21 @@
 import numpy as np
 
+
 # defining naive function
 def naive_method(
-        post_estim,
-        X,
-        alpha = 0.1,
-        score_type = "HPD",
-        B_naive = 1000,
-        device = "cuda",
-        B_waldo = 1000,
-        grid_step = 0.005,
-        n_grid = None,
-        ):
+    post_estim,
+    X,
+    alpha=0.1,
+    score_type="HPD",
+    B_naive=1000,
+    device="cuda",
+    B_waldo=1000,
+    grid_step=0.005,
+    n_grid=None,
+):
     """
     Naive credible sets based on the posterior distribution.
-    
+
     Args:
         data (np.ndarray or torch.Tensor): Input data for the method.
         params (dict): Parameters required for the method.
@@ -24,20 +25,24 @@ def naive_method(
     """
     if device == "cuda":
         X = X.to(device="cuda")
-    
+
+    # check if X has only one dimension
+    if len(X.shape) == 1:
+        X = X.reshape(1, -1)
+
     # samples to compute scores
     samples = post_estim.sample(
         (B_naive,),
-        x=X.reshape(1, -1),
+        x=X,
         show_progress_bars=False,
     )
-    
+
     # if score_type is HPD
     if score_type == "HPD":
         conf_scores = -np.exp(
-            post_estim.log_prob_batched(
+            post_estim.log_prob(
                 samples,
-                x=X.reshape(1, -1),
+                x=X,
             )
             .cpu()
             .numpy()
@@ -49,12 +54,12 @@ def naive_method(
         sample_generated = (
             post_estim.sample(
                 (B_waldo,),
-                x=X.reshape(1,-1),
+                x=X,
                 show_progress_bars=False,
             )
             .cpu()
             .detach()
-            .numpy()   
+            .numpy()
         )
 
         print(sample_generated.shape)
@@ -65,7 +70,7 @@ def naive_method(
             inv_matrix = np.linalg.inv(covariance_matrix)
         else:
             inv_matrix = 1 / covariance_matrix
-        
+
         # computing waldo scores for each estimated posterior sample
         for i in range(B_naive):
             if mean_array.shape[0] > 1:
@@ -78,19 +83,19 @@ def naive_method(
             else:
                 sample_fixed = samples[i].cpu().numpy()
                 conf_scores[i] = (mean_array - samples[i]) ** 2 / (covariance_matrix)
-    
+
     # picking large grid between maximum and minimum densities
     if n_grid is None:
         t_grid = np.arange(
-        np.min(conf_scores),
-        np.max(conf_scores),
-        grid_step,
-    )
+            np.min(conf_scores),
+            np.max(conf_scores),
+            grid_step,
+        )
     else:
         t_grid = np.linspace(
             np.min(conf_scores),
             np.max(conf_scores),
-            num = n_grid,
+            num=n_grid,
         )
     target_coverage = 1 - alpha
 

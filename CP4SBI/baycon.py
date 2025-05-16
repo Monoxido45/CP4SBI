@@ -110,7 +110,7 @@ class LocartInf(BaseEstimator):
         Ouput: Vector of cutoffs.
         """
         res = self.sbi_score.compute(X_calib, theta_calib)
-
+        print(np.min(res))
         if self.weighting:
             w = self.compute_difficulty(X_calib)
             X_calib = np.concatenate((X_calib, w.reshape(-1, 1)), axis=1)
@@ -123,7 +123,10 @@ class LocartInf(BaseEstimator):
                 res_calib_train,
                 res_calib_test,
             ) = train_test_split(
-                X_calib, res, test_size=1 - cart_train_size, random_state=random_seed
+                X_calib,
+                res,
+                test_size=1 - cart_train_size,
+                random_state=random_seed,
             )
 
         if self.cart_type == "CART":
@@ -371,7 +374,6 @@ class CDFSplit(BaseEstimator):
 
             # computing the score for each sample
             res_theta = self.sbi_score.compute(X, theta_pos, one_X=True)
-
             # computing new conformal score
             new_res[i] = np.mean(res_theta <= res[i])
 

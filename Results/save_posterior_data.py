@@ -26,7 +26,6 @@ parser.add_argument(
     type=int,
 )
 
-
 if __name__ == "__main__":
     args = parser.parse_args()  # get arguments from command line
 else:
@@ -35,7 +34,6 @@ else:
 task_name = args.task
 seed = args.seed
 n_samples = args.n_samples
-n_x = args.n_x
 # Set the random seed for reproducibility
 torch.manual_seed(seed)
 torch.cuda.manual_seed(seed)
@@ -47,10 +45,12 @@ task = sbibm.get_task(task_name)
 simulator = task.get_simulator()
 prior = task.get_prior()
 
-
-# simulating theta and X observed
-theta_obs = prior(num_samples=n_x)
-X_obs = simulator(theta_obs)
+if task_name == "slcp" or task_name == "sir" or task_name == "lotka_volterra":
+    n_x = 10
+else:
+    n_x = args.n_x
+    theta_obs = prior(num_samples=n_x)
+    X_obs = simulator(theta_obs)
 
 # creating the directory to save the results
 save_dir = f"Results/posterior_data/"
@@ -69,23 +69,32 @@ else:
     i = 0
 
 # Generate samples for each X
-for X in tqdm(X_obs[i:], desc="Generating samples for each X"):
+for j in tqdm(range(i, n_x), desc="Generating samples for each X"):
     if (
         task.name == "gaussian_linear_uniform"
         or task.name == "gaussian_linear"
         or task.name == "gaussian_mixture"
-        or task.name == "slcp"
-        or task.name == "sir"
-        or task.name == "lotka_volterra"
     ):
+        X = X_obs[j]
         post_dict[X.reshape(1, -1)] = task._sample_reference_posterior(
             num_samples=n_samples,
             observation=X.reshape(1, -1),
         )
+    elif (
+        task.name == "slcp"
+        or task.name == "sir"
+        or task.name == "lotka_volterra"
+        or task.name == "bernoulli_glm"
+    ):
+        X = task.get_observation(num_observation=j + 1)
+        post_dict[X] = task.get_reference_posterior_samples(
+            num_observation=j + 1,
+        )[:n_samples]
     else:
+        X = X_obs[i]
         post_dict[X.reshape(1, -1)] = task._sample_reference_posterior(
             num_samples=n_samples,
-            num_observation=i,
+            num_observation=j + 1,
             observation=X.reshape(1, -1),
         )
     i += 1

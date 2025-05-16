@@ -30,6 +30,9 @@ setup(
         "tqdm==4.66.5",
         "torch>=2.5.1",
         "sbi>=0.24.0",
+        "numpyro",
+        "jax",
+        "sbibm"
     ],
     python_requires=">=3.10",
     zip_safe=False,

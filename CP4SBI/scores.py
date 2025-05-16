@@ -76,31 +76,30 @@ class HPDScore(sbi_Scores):
             par_n = thetas_calib.shape[0]
             log_prob_array = np.zeros(par_n)
             for i in range(par_n):
-                if not self.cuda:
-                    log_prob_array[i] = (
-                        self.posterior.log_prob(thetas_calib[i, :], x=X_calib[i, :])
-                        .detach()
-                        .numpy()
+                log_prob_array[i] = (
+                    self.posterior.log_prob(
+                        thetas_calib[i].reshape(1, -1),
+                        x=X_calib[i].reshape(1, -1),
                     )
-                else:
-                    log_prob_array[i] = (
-                        self.posterior.log_prob(thetas_calib[i, :], x=X_calib[i, :])
-                        .cpu()
-                        .detach()
-                        .numpy()
-                    )
+                    .cpu()
+                    .detach()
+                    .numpy()
+                )
+
         else:
+            if len(X_calib.shape) == 1:
+                X_calib = X_calib.reshape(1, -1)
+
             # computing log_prob for only one X
             log_prob_array = (
-                self.posterior.log_prob_batched(
+                self.posterior.log_prob(
                     thetas_calib,
-                    x=X_calib.reshape(1, -1),
+                    x=X_calib,
                 )
                 .cpu()
                 .detach()
                 .numpy()
             )
-
         # computing posterior density for theta
         return -(np.exp(log_prob_array))
 
@@ -120,7 +119,7 @@ class WALDOScore(sbi_Scores):
         self.posterior = self.inference_obj.build_posterior()
         return self
 
-    def compute(self, X_calib, thetas_calib, one_X=False, B = 1000):
+    def compute(self, X_calib, thetas_calib, one_X=False, B=1000):
         if not isinstance(X_calib, torch.Tensor) or X_calib.dtype != torch.float32:
             X_calib = torch.tensor(X_calib, dtype=torch.float32)
         if (
@@ -139,7 +138,7 @@ class WALDOScore(sbi_Scores):
             waldo_array = np.zeros(par_n)
             for i in range(par_n):
                 sample_generated = (
-                        self.posterior.sample(
+                    self.posterior.sample(
                         (B,),
                         x=X_calib[i, :].reshape(1, -1),
                         show_progress_bars=False,
@@ -147,7 +146,7 @@ class WALDOScore(sbi_Scores):
                     .cpu()
                     .detach()
                     .numpy()
-                    )
+                )
 
                 # computing mean and covariance matrix
                 mean_array = np.mean(sample_generated, axis=0)
@@ -162,7 +161,9 @@ class WALDOScore(sbi_Scores):
                     )
                 else:
                     theta_fixed = thetas_calib[i].cpu().numpy()
-                    waldo_array[i] = (mean_array - theta_fixed) ** 2 / (covariance_matrix)
+                    waldo_array[i] = (mean_array - theta_fixed) ** 2 / (
+                        covariance_matrix
+                    )
 
         else:
             par_n = thetas_calib.shape[0]
@@ -195,7 +196,9 @@ class WALDOScore(sbi_Scores):
                     )
                 else:
                     theta_fixed = thetas_calib[i].cpu().numpy()
-                    waldo_array[i] = (mean_array - theta_fixed) ** 2 / (covariance_matrix)
+                    waldo_array[i] = (mean_array - theta_fixed) ** 2 / (
+                        covariance_matrix
+                    )
 
         # computing posterior density for theta
         return waldo_array
