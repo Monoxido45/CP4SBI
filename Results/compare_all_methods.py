@@ -171,12 +171,38 @@ elif task.name == "gaussian_linear":
         validate_args=False,
     )
     prior_NPE, _, _ = process_prior(prior_dist)
+elif task.name == "bernoulli_glm":
+    dim_parameters = 10
+    # parameters for the prior distribution
+    M = dim_parameters - 1
+    D = torch.diag(torch.ones(M, device=device)) - torch.diag(
+        torch.ones(M - 1, device=device), -1
+    )
+    F = (
+        torch.matmul(D, D)
+        + torch.diag(1.0 * torch.arange(M, device=device) / (M)) ** 0.5
+    )
+    Binv = torch.zeros(size=(M + 1, M + 1), device=device)
+    Binv[0, 0] = 0.5  # offset
+    Binv[1:, 1:] = torch.matmul(F.T, F)  # filter
+
+    prior_params = {
+        "loc": torch.zeros((M + 1,), device=device),
+        "precision_matrix": Binv,
+    }
+
+    prior_dist = MultivariateNormal(
+        **prior_params,
+        validate_args=False,
+    )
+    prior_NPE, _, _ = process_prior(prior_dist)
 elif task.name == "gaussian_mixture":
     prior_NPE = BoxUniform(
         low=-10 * torch.ones(task.dim_parameters),
         high=10 * torch.ones(task.dim_parameters),
         device=device,
     )
+
 elif task.name == "sir":
     prior_list = [
         LogNormal(
@@ -200,8 +226,32 @@ elif task.name == "lotka_volterra":
         "loc": torch.tensor([mu_p1, mu_p2, mu_p1, mu_p2], device=device),
         "scale": torch.tensor([sigma_p, sigma_p, sigma_p, sigma_p], device=device),
     }
-    prior_dist = LogNormal(**prior_params, validate_args=False)
+
+    prior_list = [
+        LogNormal(
+            loc=torch.tensor([mu_p1], device=device),
+            scale=torch.tensor([sigma_p], device=device),
+            validate_args=False,
+        ),
+        LogNormal(
+            loc=torch.tensor([mu_p2], device=device),
+            scale=torch.tensor([sigma_p], device=device),
+            validate_args=False,
+        ),
+        LogNormal(
+            loc=torch.tensor([mu_p1], device=device),
+            scale=torch.tensor([sigma_p], device=device),
+            validate_args=False,
+        ),
+        LogNormal(
+            loc=torch.tensor([mu_p2], device=device),
+            scale=torch.tensor([sigma_p], device=device),
+            validate_args=False,
+        ),
+    ]
+    prior_dist = MultipleIndependent(prior_list, validate_args=False)
     prior_NPE, _, _ = process_prior(prior_dist)
+
 
 # unused simulators
 # elif task.name == "bernoulli_glm":
@@ -375,7 +425,7 @@ def compute_coverage(
 
         if score_type == "HPD":
             # computing naive cutoff
-            if task_name == "sir":
+            if task_name == "sir" or task_name == "lotka_volterra":
                 closest_t = naive_method(
                     post_estim,
                     X=X_0,
@@ -409,19 +459,20 @@ def compute_coverage(
             )
         elif score_type == "WALDO":
             # computing naive cutoff
-            if task_name == "sir":
+            if task_name == "sir" or task_name == "lotka_volterra":
                 closest_t, mean_array, inv_matrix = naive_method(
-                    X=X,
+                    post_estim,
+                    X=X_0,
                     alpha=alpha,
                     score_type=score_type,
                     device=device,
                     B_naive=naive_samples,
-                    n_grid=700,
+                    n_grid=1000,
                 )
             else:
                 closest_t, mean_array, inv_matrix = naive_method(
                     post_estim,
-                    X=X,
+                    X=X_0,
                     alpha=alpha,
                     score_type=score_type,
                     device=device,
