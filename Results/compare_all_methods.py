@@ -117,14 +117,14 @@ num_obs = args.n_x
 if X_str:
     # Load the X_list pickle file from the X_data folder
     x_data_path = os.path.join(
-        original_path, "Results/X_data", f"{task_name}_X_samples.pkl"
+        original_path, "Results/X_data", f"{task_name}_X_samples_{B}.pkl"
     )
     with open(x_data_path, "rb") as f:
         X_data = pickle.load(f)
 
     # Load the X_list pickle file from the X_data folder
     theta_data_path = os.path.join(
-        original_path, "Results/X_data", f"{task_name}_theta_samples.pkl"
+        original_path, "Results/X_data", f"{task_name}_theta_samples_{B}.pkl"
     )
     with open(theta_data_path, "rb") as f:
         theta_list = pickle.load(f)
