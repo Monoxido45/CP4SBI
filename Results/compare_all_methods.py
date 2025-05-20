@@ -425,7 +425,11 @@ def compute_coverage(
 
         if score_type == "HPD":
             # computing naive cutoff
-            if task_name == "sir" or task_name == "lotka_volterra":
+            if (
+                task_name == "sir"
+                or task_name == "lotka_volterra"
+                or task_name == "gaussian_linear"
+            ):
                 closest_t = naive_method(
                     post_estim,
                     X=X_0,
@@ -459,7 +463,11 @@ def compute_coverage(
             )
         elif score_type == "WALDO":
             # computing naive cutoff
-            if task_name == "sir" or task_name == "lotka_volterra":
+            if (
+                task_name == "sir"
+                or task_name == "lotka_volterra"
+                or task_name == "gaussian_linear"
+            ):
                 closest_t, mean_array, inv_matrix = naive_method(
                     post_estim,
                     X=X_0,
@@ -609,7 +617,7 @@ os.makedirs(mae_results_path, exist_ok=True)
 
 # Save the all_coverage_df DataFrame to a CSV file
 csv_path = os.path.join(
-    mae_results_path, f"{score_type}_{task_name}_coverage_results.csv"
+    mae_results_path, f"{score_type}_{task_name}_coverage_results_{B}.csv"
 )
 all_coverage_df.to_csv(csv_path, index=False)
 
@@ -620,7 +628,7 @@ summary_stats = summary_stats.drop(index="std")  # Drop standard deviation row
 
 # Save the summary statistics to a CSV file
 summary_csv_path = os.path.join(
-    mae_results_path, f"{score_type}_{task_name}_coverage_summary.csv"
+    mae_results_path, f"{score_type}_{task_name}_coverage_summary_{B}.csv"
 )
 summary_stats.to_csv(summary_csv_path)
 
