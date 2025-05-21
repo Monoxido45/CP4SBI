@@ -271,6 +271,7 @@ elif task.name == "lotka_volterra":
 def compute_coverage(
     prior_NPE,
     score_type,
+    split_calib=False,
     X=None,
     theta=None,
     B=5000,
@@ -356,6 +357,29 @@ def compute_coverage(
         theta_calib=thetas_calib,
     )
 
+    print("Fitting local CDF split")
+    # CDF split + LOCART
+    local_cdf_conf = BayCon(
+        sbi_score=score_used,
+        base_inference=inference,
+        is_fitted=True,
+        conformal_method="CDF local",
+        split_calib=split_calib,
+        cuda=cuda,
+        alpha=alpha,
+    )
+
+    local_cdf_conf.fit(
+        X=X_train,
+        theta=theta_train,
+    )
+
+    local_cdf_conf.calib(
+        X_calib=X_calib,
+        theta_calib=thetas_calib,
+        min_samples_leaf=min_samples_leaf,
+    )
+
     # fitting LOCART
     print("Fitting LOCART")
     bayes_conf = BayCon(
@@ -363,6 +387,7 @@ def compute_coverage(
         base_inference=inference,
         is_fitted=True,
         conformal_method="local",
+        split_calib=split_calib,
         cuda=cuda,
         alpha=alpha,
     )
@@ -373,7 +398,29 @@ def compute_coverage(
     bayes_conf.calib(
         X_calib=X_calib,
         theta_calib=thetas_calib,
-        locart_kwargs={"min_samples_leaf": min_samples_leaf},
+        min_samples_leaf=min_samples_leaf,
+    )
+
+    # fitting LOCART
+    print("Fitting A-LOCART")
+    w_bayes_conf = BayCon(
+        sbi_score=score_used,
+        base_inference=inference,
+        is_fitted=True,
+        conformal_method="local",
+        weighting=True,
+        split_calib=split_calib,
+        cuda=cuda,
+        alpha=alpha,
+    )
+    w_bayes_conf.fit(
+        X=X_train,
+        theta=theta_train,
+    )
+    w_bayes_conf.calib(
+        X_calib=X_calib,
+        theta_calib=thetas_calib,
+        min_samples_leaf=min_samples_leaf,
     )
 
     # global
@@ -401,6 +448,8 @@ def compute_coverage(
     coverage_global = np.zeros(num_obs)
     coverage_cdf = np.zeros(num_obs)
     coverage_naive = np.zeros(num_obs)
+    coverage_local_cdf = np.zeros(num_obs)
+    coverage_a_locart = np.zeros(num_obs)
 
     # Load the dictionary from the pickle file
     posterior_data_path = (
@@ -413,6 +462,8 @@ def compute_coverage(
     locart_cutoff = bayes_conf.predict_cutoff(X_obs)
     global_cutoff = global_conf.predict_cutoff(X_obs)
     cdf_cutoff = cdf_conf.predict_cutoff(X_obs)
+    local_cdf_cutoff = local_cdf_conf.predict_cutoff(X_obs)
+    alocart_cutoff = w_bayes_conf.predict_cutoff(X_obs)
 
     i = 0
     dict_keys = list(X_dict.keys())
@@ -506,6 +557,8 @@ def compute_coverage(
         coverage_global[i] = np.mean(conf_scores <= global_cutoff[i])
         coverage_naive[i] = np.mean(conf_scores <= closest_t)
         coverage_cdf[i] = np.mean(conf_scores <= cdf_cutoff[i])
+        coverage_local_cdf[i] = np.mean(conf_scores <= local_cdf_cutoff[i])
+        coverage_a_locart[i] = np.mean(conf_scores <= alocart_cutoff[i])
 
         i += 1
 
@@ -513,9 +566,11 @@ def compute_coverage(
     coverage_df = pd.DataFrame(
         {
             "LOCART MAD": [np.mean(np.abs(coverage_locart - (1 - alpha)))],
+            "A-LOCART MAD": [np.mean(np.abs(coverage_a_locart - (1 - alpha)))],
             "Global CP MAD": [np.mean(np.abs(coverage_global - (1 - alpha)))],
             "Naive MAD": [np.mean(np.abs(coverage_naive - (1 - alpha)))],
             "CDF MAD": [np.mean(np.abs(coverage_cdf - (1 - alpha)))],
+            "Local CDF MAD": [np.mean(np.abs(coverage_local_cdf - (1 - alpha)))],
         }
     )
     return coverage_df

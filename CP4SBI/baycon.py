@@ -58,28 +58,17 @@ class LocartInf(BaseEstimator):
         self.weighting = weighting
         self.cuda = cuda
 
-    def fit(self, X, theta, random_seed_tree=1250, **kwargs):
+    def fit(self, X, theta):
         """
         Fit base model embeded in the conformal score class to the training set.
-        If "weigthing" is True, we fit a Random Forest model to obtain variance estimations as done in Bostrom et.al.(2021).
         --------------------------------------------------------
 
         Input: (i)    X: Training numpy feature matrix
-               (ii)   y: Training label array
-               (iii)  random_seed_tree: Random Forest random seed for variance estimation (if weighting parameter is True).
-               (iv)   **kwargs: Keyword arguments passed to fit the random forest used for variance estimation.
+               (ii)   theta: Training parameters array
 
         Output: LocartSplit object
         """
         self.sbi_score.fit(X, theta)
-        if self.weighting == True:
-            # TODO: add better option for weighting and A-locart
-            self.dif_model = (
-                RandomForestRegressor(random_state=random_seed_tree)
-                .set_params(**kwargs)
-                .fit(X, theta)
-            )
-        # TODO: add CDF of the score modification inside LOCART
         return self
 
     def calib(
@@ -90,6 +79,8 @@ class LocartInf(BaseEstimator):
         prune_tree=True,
         prune_seed=780,
         cart_train_size=0.5,
+        n_samples=1000,
+        min_samples_leaf=100,
         **kwargs
     ):
         """
@@ -110,9 +101,11 @@ class LocartInf(BaseEstimator):
         Ouput: Vector of cutoffs.
         """
         res = self.sbi_score.compute(X_calib, theta_calib)
-        print(np.min(res))
+
+        # computing variance of the conformal score
         if self.weighting:
-            w = self.compute_difficulty(X_calib)
+            # generating n_samples samples from the posterior
+            w = self.compute_variance(X_calib, n_samples=n_samples)
             X_calib = np.concatenate((X_calib, w.reshape(-1, 1)), axis=1)
 
         # splitting calibration data into a partitioning set and a cutoff set
@@ -132,7 +125,7 @@ class LocartInf(BaseEstimator):
         if self.cart_type == "CART":
             # declaring decision tree
             self.cart = DecisionTreeRegressor(
-                random_state=random_seed, min_samples_leaf=100
+                random_state=random_seed, min_samples_leaf=min_samples_leaf
             ).set_params(**kwargs)
             # obtaining optimum alpha to prune decision tree
             if prune_tree:
@@ -200,22 +193,40 @@ class LocartInf(BaseEstimator):
 
         return self.cutoffs
 
-    def compute_difficulty(self, X):
+    def compute_variance(self, X, n_samples=1000):
         """
         Auxiliary function to compute difficulty for each sample.
         --------------------------------------------------------
         input: (i)    X: specified numpy feature matrix
+               (ii)   n_samples: number of samples to be used for Monte Carlo approximation.
 
         output: Vector of variance estimates for each sample.
         """
-        cart_pred = np.zeros((X.shape[0], len(self.dif_model.estimators_)))
-        i = 0
-        # computing the difficulty score for each X_score
-        for cart in self.dif_model.estimators_:
-            cart_pred[:, i] = cart.predict(X)
-            i += 1
-        # computing variance for each dataset row
-        return cart_pred.var(1)
+        var_array = np.zeros(X.shape[0])
+        # Convert X to torch tensor if it is a numpy array
+        if isinstance(X, np.ndarray):
+            X = torch.tensor(X, dtype=torch.float32)
+
+        j = 0
+        for X_obs in tqdm(X, desc="Computting variance of conformal scores"):
+            X_obs = X_obs.reshape(1, -1)
+
+            if self.cuda:
+                X_obs = X_obs.to(device="cuda")
+
+            # generating n_samples samples from the posterior
+            theta_pos = self.sbi_score.posterior.sample(
+                (n_samples,),
+                x=X_obs,
+                show_progress_bars=False,
+            )
+
+            # computing the score for each sample
+            res_theta = self.sbi_score.compute(X_obs, theta_pos, one_X=True)
+            var_array[j] = np.var(res_theta)
+            j += 1
+
+        return var_array
 
     def prune_tree(self, X_train, X_valid, res_train, res_valid):
         """
@@ -260,17 +271,18 @@ class LocartInf(BaseEstimator):
                 plt.title(title)
             plt.show()
 
-    def predict_cutoff(self, X):
+    def predict_cutoff(self, X, n_samples=1000):
         """
         Predict cutoffs for each test sample using locart local cutoffs.
         --------------------------------------------------------
         Input: (i)    X: test numpy feature matrix
+               (ii)   n_samples: number of samples to be used for Monte Carlo approximation.
 
         Output: Cutoffs for each test sample.
         """
         # identifying cutoff point
         if self.weighting:
-            w = self.compute_difficulty(X)
+            w = self.compute_variance(X, n_samples=n_samples)
             X_tree = np.concatenate((X, w.reshape(-1, 1)), axis=1)
         else:
             X_tree = X
@@ -297,6 +309,7 @@ class CDFSplit(BaseEstimator):
         is_fitted=False,
         cuda=False,
         local_cutoffs=False,
+        split_calib=False,
     ):
         """
         Input: (i)    sbi_score: Bayesian score of choosing. It can be specified by instantiating a Bayesian score class based on the sbi_Scores basic class.
@@ -318,6 +331,7 @@ class CDFSplit(BaseEstimator):
         self.cuda = cuda
         self.is_fitted = is_fitted
         self.local_cutoffs = local_cutoffs
+        self.split_calib = split_calib
 
     def fit(self, X, theta):
         """
@@ -337,7 +351,6 @@ class CDFSplit(BaseEstimator):
         X_calib,
         theta_calib,
         n_samples=1000,
-        split_calib=False,
         cart_train_size=0.5,
         random_seed=1250,
         prune_tree=True,
@@ -399,7 +412,7 @@ class CDFSplit(BaseEstimator):
             )
         else:
             print("Fitting LOCART to CDF scores to derive local cutoffs")
-            if split_calib:
+            if self.split_calib:
                 (
                     X_calib_train,
                     X_calib_test,
@@ -419,7 +432,7 @@ class CDFSplit(BaseEstimator):
             )
 
             # obtaining optimum alpha to prune decision tree used to obtain local cutoffs
-            if split_calib and prune_tree:
+            if self.split_calib and prune_tree:
                 optim_ccp = self.prune_tree(
                     X_calib_train,
                     res_calib_train,
@@ -439,7 +452,7 @@ class CDFSplit(BaseEstimator):
                 self.cart.set_params(ccp_alpha=optim_ccp)
 
             # fitting and predicting leaf labels
-            if split_calib:
+            if self.split_calib:
                 self.cart.fit(X_calib_train, res_calib_train)
                 leafs_idx = self.cart.apply(X_calib_test)
             else:
@@ -450,7 +463,7 @@ class CDFSplit(BaseEstimator):
             self.cutoffs = {}
 
             for leaf in self.leaf_idx:
-                if split_calib:
+                if self.split_calib:
                     current_res = res_calib_test[leafs_idx == leaf]
 
                     # correcting 1 - alpha
@@ -631,6 +644,7 @@ class BayCon:
                 base_inference,
                 alpha=self.alpha,
                 is_fitted=self.is_fitted,
+                split_calib=split_calib,
                 cuda=cuda,
             )
         elif self.conformal_method == "CDF local":
@@ -639,6 +653,7 @@ class BayCon:
                 base_inference,
                 alpha=self.alpha,
                 is_fitted=self.is_fitted,
+                split_calib=split_calib,
                 cuda=cuda,
                 local_cutoffs=True,
             )
@@ -663,7 +678,6 @@ class BayCon:
         self,
         X_calib,
         theta_calib,
-        split_calib=False,
         prune_tree=True,
         min_samples_leaf=100,
         cart_train_size=0.5,
@@ -706,7 +720,6 @@ class BayCon:
                     X_calib,
                     theta_calib,
                     prune_tree=prune_tree,
-                    split_calib=split_calib,
                     min_samples_leaf=min_samples_leaf,
                     cart_train_size=cart_train_size,
                     random_seed=random_seed,
@@ -717,7 +730,6 @@ class BayCon:
                     X_calib,
                     theta_calib,
                     prune_tree=prune_tree,
-                    split_calib=split_calib,
                     min_samples_leaf=min_samples_leaf,
                     cart_train_size=cart_train_size,
                     random_seed=random_seed,
@@ -731,7 +743,6 @@ class BayCon:
                 X_calib,
                 theta_calib,
                 prune_tree=prune_tree,
-                split_calib=split_calib,
                 min_samples_leaf=min_samples_leaf,
                 cart_train_size=cart_train_size,
                 random_seed=random_seed,
