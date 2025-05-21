@@ -296,6 +296,7 @@ class CDFSplit(BaseEstimator):
         alpha,
         is_fitted=False,
         cuda=False,
+        local_cutoffs=False,
     ):
         """
         Input: (i)    sbi_score: Bayesian score of choosing. It can be specified by instantiating a Bayesian score class based on the sbi_Scores basic class.
@@ -303,6 +304,7 @@ class CDFSplit(BaseEstimator):
                (iii)  alpha: Float between 0 and 1 specifying the miscoverage level of resulting prediction region.
                (iv)   is_fitted: Boolean indicating whether the base model is already fitted or not.
                (v)    cuda: Boolean indicating whether to use GPU or not.
+               (vi)   local_cutoffs: Boolean indicating whether to use local cutoffs derived by LOCART or not.
         """
         self.sbi_score = sbi_score(
             base_inference,
@@ -315,6 +317,7 @@ class CDFSplit(BaseEstimator):
         self.alpha = alpha
         self.cuda = cuda
         self.is_fitted = is_fitted
+        self.local_cutoffs = local_cutoffs
 
     def fit(self, X, theta):
         """
@@ -334,6 +337,11 @@ class CDFSplit(BaseEstimator):
         X_calib,
         theta_calib,
         n_samples=1000,
+        split_calib=False,
+        cart_train_size=0.5,
+        random_seed=1250,
+        prune_tree=True,
+        min_samples_leaf=100,
     ):
         """
         Calibrate conformity score using the cumulative distribution function of the score derived by the sbi base model.
@@ -344,6 +352,10 @@ class CDFSplit(BaseEstimator):
                (ii)   theta_calib: Calibration parameter array
                (iii)  random_seed: Random seed for Monte Carlo.
                (iv)   n_samples: Number of samples to be used for Monte Carlo approximation.
+               (v)  split_calib: Boolean indicating whether to split the calibration set into partitioning and cutoff set when using local cutoffs.
+               (vi)  cart_train_size: Proportion of calibration data used in partitioning when using local cutoffs.
+               (vii) random_seed: Random seed for data splitting in the prune step when using local cutoffs.
+               (viii) prune_tree: Boolean indicating whether to prune the decision tree or not when using local cutoffs.
 
         Ouput: Vector of cutoffs.
         """
@@ -379,11 +391,127 @@ class CDFSplit(BaseEstimator):
 
             i += 1
 
-        # computing cutoff on new res
-        n = new_res.shape[0]
-        self.cutoff = np.quantile(new_res, q=np.ceil((n + 1) * (1 - self.alpha)) / n)
+        if not self.local_cutoffs:
+            # computing cutoff on new res
+            n = new_res.shape[0]
+            self.cutoffs = np.quantile(
+                new_res, q=np.ceil((n + 1) * (1 - self.alpha)) / n
+            )
+        else:
+            print("Fitting LOCART to CDF scores to derive local cutoffs")
+            if split_calib:
+                (
+                    X_calib_train,
+                    X_calib_test,
+                    res_calib_train,
+                    res_calib_test,
+                ) = train_test_split(
+                    X_calib,
+                    new_res,
+                    test_size=1 - cart_train_size,
+                    random_state=random_seed,
+                )
 
-        return self.cutoff
+            # fitting LOCART to obtain local cutoffs
+            # instatiating decision tree
+            self.cart = DecisionTreeRegressor(
+                random_state=random_seed, min_samples_leaf=min_samples_leaf
+            )
+
+            # obtaining optimum alpha to prune decision tree used to obtain local cutoffs
+            if split_calib and prune_tree:
+                optim_ccp = self.prune_tree(
+                    X_calib_train,
+                    res_calib_train,
+                    split_size=0.5,
+                    random_seed=random_seed,
+                )
+                # pruning decision tree
+                self.cart.set_params(ccp_alpha=optim_ccp)
+            elif prune_tree:
+                optim_ccp = self.prune_tree(
+                    X_calib,
+                    new_res,
+                    split_size=0.5,
+                    random_seed=random_seed,
+                )
+                # pruning decision tree
+                self.cart.set_params(ccp_alpha=optim_ccp)
+
+            # fitting and predicting leaf labels
+            if split_calib:
+                self.cart.fit(X_calib_train, res_calib_train)
+                leafs_idx = self.cart.apply(X_calib_test)
+            else:
+                self.cart.fit(X_calib, new_res)
+                leafs_idx = self.cart.apply(X_calib)
+
+            self.leaf_idx = np.unique(leafs_idx)
+            self.cutoffs = {}
+
+            for leaf in self.leaf_idx:
+                if split_calib:
+                    current_res = res_calib_test[leafs_idx == leaf]
+
+                    # correcting 1 - alpha
+                    n = current_res.shape[0]
+
+                    self.cutoffs[leaf] = np.quantile(
+                        current_res, q=np.ceil((n + 1) * (1 - self.alpha)) / n
+                    )
+                else:
+                    current_res = new_res[leafs_idx == leaf]
+
+                    # correcting 1 - alpha
+                    n = current_res.shape[0]
+
+                    self.cutoffs[leaf] = np.quantile(
+                        current_res, q=np.ceil((n + 1) * (1 - self.alpha)) / n
+                    )
+        return self.cutoffs
+
+    # function to prune tree
+    def prune_tree(self, X, res, split_size, random_seed):
+        """
+        Auxiliary function to conduct decision tree post pruning.
+        --------------------------------------------------------
+        Input: (i)    X: numpy feature matrix used to fit decision trees for each cost complexity alpha values.
+               (ii)  res: conformal scores used to fit decision trees for each cost complexity alpha values.
+               (iii) split_size: proportion of data used to fit decision trees for each cost complexity alpha values.
+                (iv)  random_seed: random seed for data splitting in the prune step.
+
+        Output: Optimal cost complexity path to perform pruning.
+        """
+        # splitting data into training and validation sets
+        (
+            X_train,
+            X_valid,
+            res_train,
+            res_valid,
+        ) = train_test_split(
+            X,
+            res,
+            test_size=split_size,
+            random_state=random_seed,
+        )
+
+        prune_path = self.cart.cost_complexity_pruning_path(X_train, res_train)
+        ccp_alphas = prune_path.ccp_alphas
+        current_loss = float("inf")
+        # cross validation by data splitting to choose alphas
+        for ccp_alpha in ccp_alphas:
+            preds_ccp = (
+                clone(self.cart)
+                .set_params(ccp_alpha=ccp_alpha)
+                .fit(X_train, res_train)
+                .predict(X_valid)
+            )
+            loss_ccp = mean_squared_error(res_valid, preds_ccp)
+            if loss_ccp < current_loss:
+                current_loss = loss_ccp
+                optim_ccp = ccp_alpha
+
+        return optim_ccp
 
     def predict_cutoff(self, X_test, n_samples=2000):
         """
@@ -401,23 +529,54 @@ class CDFSplit(BaseEstimator):
             X_test = torch.tensor(X_test, dtype=torch.float32)
 
         # sampling from posterior
-        for X in tqdm(X_test, desc="Computting CDF-based cutoffs"):
-            X = X.reshape(1, -1)
-            if self.cuda:
-                X = X.to(device="cuda")
-            theta_pos = self.sbi_score.posterior.sample(
-                (n_samples,),
-                x=X,
-                show_progress_bars=False,
-            )
+        if not self.local_cutoffs:
+            for X in tqdm(X_test, desc="Computting CDF-based cutoffs"):
+                X = X.reshape(1, -1)
+                if self.cuda:
+                    X = X.to(device="cuda")
+                theta_pos = self.sbi_score.posterior.sample(
+                    (n_samples,),
+                    x=X,
+                    show_progress_bars=False,
+                )
 
-            # computing the quantile from theta_pos using the new cutoff
-            cutoffs[i] = np.quantile(
-                self.sbi_score.compute(X, theta_pos, one_X=True),
-                q=self.cutoff,
-            )
+                # computing the quantile from theta_pos using the new cutoff
+                cutoffs[i] = np.quantile(
+                    self.sbi_score.compute(X, theta_pos, one_X=True),
+                    q=self.cutoffs,
+                )
 
-            i += 1
+                i += 1
+        else:
+            # first deriving the local cutoffs
+            leaves_idx = self.cart.apply(X_test.numpy())
+            print(leaves_idx)
+            cutoffs_local = np.array(itemgetter(*leaves_idx)(self.cutoffs))
+
+            for X in tqdm(X_test, desc="Computting local CDF-based cutoffs"):
+                X = X.reshape(1, -1)
+
+                if cutoffs_local.ndim == 0:
+                    spec_cutoff = cutoffs_local
+                else:
+                    spec_cutoff = cutoffs_local[i]
+
+                if self.cuda:
+                    X = X.to(device="cuda")
+
+                theta_pos = self.sbi_score.posterior.sample(
+                    (n_samples,),
+                    x=X,
+                    show_progress_bars=False,
+                )
+
+                # computing the quantile from theta_pos using the new cutoff
+                cutoffs[i] = np.quantile(
+                    self.sbi_score.compute(X, theta_pos, one_X=True),
+                    q=spec_cutoff,
+                )
+
+                i += 1
 
         return cutoffs
 
@@ -442,7 +601,7 @@ class BayCon:
             sbi_score: Bayesian score class instance
             base_inference: Base inference model to be used
             is_fitted (bool): Flag indicating if the model is fitted
-            conformal_method (str): Method for conformal prediction ('global' or 'local')
+            conformal_method (str): Method for conformal prediction ('global', 'local', "CDF" or "CDF local")
         """
         self.is_fitted = is_fitted
         self.cuda = cuda
@@ -474,6 +633,15 @@ class BayCon:
                 is_fitted=self.is_fitted,
                 cuda=cuda,
             )
+        elif self.conformal_method == "CDF local":
+            self.cdf_split = CDFSplit(
+                sbi_score,
+                base_inference,
+                alpha=self.alpha,
+                is_fitted=self.is_fitted,
+                cuda=cuda,
+                local_cutoffs=True,
+            )
 
     def fit(self, X, theta):
         """
@@ -485,7 +653,7 @@ class BayCon:
         """
         if self.conformal_method == "local":
             self.locart.fit(X, theta)
-        elif self.conformal_method == "CDF":
+        elif self.conformal_method == "CDF" or self.conformal_method == "CDF local":
             self.cdf_split.fit(X, theta)
         else:
             self.sbi_score.fit(X, theta)
@@ -495,6 +663,11 @@ class BayCon:
         self,
         X_calib,
         theta_calib,
+        split_calib=False,
+        prune_tree=True,
+        min_samples_leaf=100,
+        cart_train_size=0.5,
+        random_seed=1250,
         locart_kwargs=None,
     ):
         """
@@ -529,15 +702,42 @@ class BayCon:
         elif self.conformal_method == "local":
             self.locart.fit(X_calib, theta_calib)
             if locart_kwargs is not None:
-                self.cutoff = self.locart.calib(X_calib, theta_calib, **locart_kwargs)
+                self.cutoff = self.locart.calib(
+                    X_calib,
+                    theta_calib,
+                    prune_tree=prune_tree,
+                    split_calib=split_calib,
+                    min_samples_leaf=min_samples_leaf,
+                    cart_train_size=cart_train_size,
+                    random_seed=random_seed,
+                    **locart_kwargs,
+                )
             else:
-                self.cutoff = self.locart.calib(X_calib, theta_calib)
+                self.cutoff = self.locart.calib(
+                    X_calib,
+                    theta_calib,
+                    prune_tree=prune_tree,
+                    split_calib=split_calib,
+                    min_samples_leaf=min_samples_leaf,
+                    cart_train_size=cart_train_size,
+                    random_seed=random_seed,
+                )
 
         elif self.conformal_method == "CDF":
             self.cutoff = self.cdf_split.calib(X_calib, theta_calib)
 
+        elif self.conformal_method == "CDF local":
+            self.cutoff = self.cdf_split.calib(
+                X_calib,
+                theta_calib,
+                prune_tree=prune_tree,
+                split_calib=split_calib,
+                min_samples_leaf=min_samples_leaf,
+                cart_train_size=cart_train_size,
+                random_seed=random_seed,
+            )
+
         return self.cutoff
-        # TODO: LOCART + CDF split
 
     def predict_cutoff(
         self,
@@ -560,8 +760,7 @@ class BayCon:
         elif self.conformal_method == "global":
             cutoffs = np.repeat(self.cutoff, X_test.shape[0])
 
-        elif self.conformal_method == "CDF":
+        elif self.conformal_method == "CDF" or self.conformal_method == "CDF local":
             cutoffs = self.cdf_split.predict_cutoff(X_test)
 
-        # TODO: add HPD split/ Dheurs version
         return cutoffs
