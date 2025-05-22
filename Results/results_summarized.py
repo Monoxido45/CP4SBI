@@ -42,9 +42,9 @@ for file in files:
     # Increment the count for the best method
     method_counts[sel_key] += 1
 
-    lim_sup = mae_array[-best_method_index] + se_array[-best_method_index]
+    lim_inf = mae_array[-best_method_index] - se_array[-best_method_index]
 
-    lim_inf = mae_array[best_method_index] - se_array[best_method_index]
+    lim_sup = mae_array[best_method_index] + se_array[best_method_index]
 
     add_indexes = np.where(lim_sup - lim_inf > 0)[0]
     if add_indexes.size > 0:
