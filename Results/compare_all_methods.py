@@ -91,6 +91,14 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "--sample_with",
+    "-sw",
+    help="string for sampling method to be used inside direct_posterior",
+    default="direct",
+    type=str,
+)
+
+parser.add_argument(
     "--n_x",
     "-nx",
     help="number of X samples to be used",
@@ -113,6 +121,7 @@ device = args.device
 score_type = args.score
 X_str = args.X_list == "True"
 num_obs = args.n_x
+sample_with = args.sample_with
 
 if X_str:
     # Load the X_list pickle file from the X_data folder
@@ -198,8 +207,8 @@ elif task.name == "bernoulli_glm":
     prior_NPE, _, _ = process_prior(prior_dist)
 elif task.name == "gaussian_mixture":
     prior_NPE = BoxUniform(
-        low=-10 * torch.ones(task.dim_parameters),
-        high=10 * torch.ones(task.dim_parameters),
+        low=-10 * torch.ones(2),
+        high=10 * torch.ones(2),
         device=device,
     )
 
@@ -283,6 +292,7 @@ def compute_coverage(
     random_seed=0,
     min_samples_leaf=300,
     naive_samples=1000,
+    sample_with="direct",
 ):
     # fixing task
     task = sbibm.get_task(task_name)
@@ -350,6 +360,7 @@ def compute_coverage(
     cdf_conf.fit(
         X=X_train,
         theta=theta_train,
+        sample_with=sample_with,
     )
 
     cdf_conf.calib(
@@ -372,6 +383,7 @@ def compute_coverage(
     local_cdf_conf.fit(
         X=X_train,
         theta=theta_train,
+        sample_with=sample_with,
     )
 
     local_cdf_conf.calib(
@@ -416,6 +428,7 @@ def compute_coverage(
     w_bayes_conf.fit(
         X=X_train,
         theta=theta_train,
+        sample_with=sample_with,
     )
     w_bayes_conf.calib(
         X_calib=X_calib,
@@ -590,6 +603,7 @@ def compute_coverage_repeated(
     min_samples_leaf=150,
     naive_samples=1000,
     n_rep=30,
+    sample_with="direct",
 ):
     # Generate an array of seeds using the central_seed
     seeds = np.random.RandomState(central_seed).randint(0, 2**32 - 1, size=n_rep)
@@ -639,6 +653,7 @@ def compute_coverage_repeated(
             random_seed=seed,
             min_samples_leaf=min_samples_leaf,
             naive_samples=naive_samples,
+            sample_with=sample_with,
         )
         coverage_results.append(coverage_df)
 
@@ -664,6 +679,7 @@ all_coverage_df = compute_coverage_repeated(
     min_samples_leaf=300,
     naive_samples=1000,
     n_rep=n_rep,
+    sample_with=sample_with,
 )
 
 # Create the "MAE_results" folder if it doesn't exist

@@ -58,17 +58,18 @@ class LocartInf(BaseEstimator):
         self.weighting = weighting
         self.cuda = cuda
 
-    def fit(self, X, theta):
+    def fit(self, X, theta, **kwargs):
         """
         Fit base model embeded in the conformal score class to the training set.
         --------------------------------------------------------
 
         Input: (i)    X: Training numpy feature matrix
                (ii)   theta: Training parameters array
+                (iii)  **kwargs: Keyword arguments to be passed to the direct_posterior function.
 
         Output: LocartSplit object
         """
-        self.sbi_score.fit(X, theta)
+        self.sbi_score.fit(X, theta, **kwargs)
         return self
 
     def calib(
@@ -333,17 +334,18 @@ class CDFSplit(BaseEstimator):
         self.local_cutoffs = local_cutoffs
         self.split_calib = split_calib
 
-    def fit(self, X, theta):
+    def fit(self, X, theta, **kwargs):
         """
         Fit base model embeded in the conformal score class to the training set.
         --------------------------------------------------------
 
         Input: (i)    X: Training numpy feature matrix
                (ii)   theta: Training parameter array
+                (iii)  **kwargs: Keyword arguments to be passed to the direct_posterior function.
 
         Output: HPDSPlit object
         """
-        self.sbi_score.fit(X, theta)
+        self.sbi_score.fit(X, theta, **kwargs)
         return self
 
     def calib(
@@ -615,6 +617,10 @@ class BayCon:
             base_inference: Base inference model to be used
             is_fitted (bool): Flag indicating if the model is fitted
             conformal_method (str): Method for conformal prediction ('global', 'local', "CDF" or "CDF local")
+            alpha (float): Significance level for the conformal method
+            split_calib (bool): Whether to split calibration data into partitioning and cutoff sets
+            weighting (bool): Whether to use weighting in the conformal method
+            cuda (bool): Whether to use GPU for computations
         """
         self.is_fitted = is_fitted
         self.cuda = cuda
@@ -658,20 +664,21 @@ class BayCon:
                 local_cutoffs=True,
             )
 
-    def fit(self, X, theta):
+    def fit(self, X, theta, **kwargs):
         """
         Fit the SBI score to the training data.
 
         Args:
             X: Training feature matrix
-            theta: Training parameter vector
+            theta: Training parameter
+            **kwargs: Additional arguments for the SBI score fitting
         """
         if self.conformal_method == "local":
-            self.locart.fit(X, theta)
+            self.locart.fit(X, theta, **kwargs)
         elif self.conformal_method == "CDF" or self.conformal_method == "CDF local":
-            self.cdf_split.fit(X, theta)
+            self.cdf_split.fit(X, theta, **kwargs)
         else:
-            self.sbi_score.fit(X, theta)
+            self.sbi_score.fit(X, theta, **kwargs)
         return self
 
     def calib(

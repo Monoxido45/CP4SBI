@@ -45,7 +45,7 @@ class sbi_Scores(ABC):
 
 # HPD score
 class HPDScore(sbi_Scores):
-    def fit(self, X=None, thetas=None):
+    def fit(self, X=None, thetas=None, **kwargs):
         # setting up model for SBI package
         if not self.is_fitted:
             if not isinstance(X, torch.Tensor) or X.dtype != torch.float32:
@@ -55,7 +55,7 @@ class HPDScore(sbi_Scores):
             self.inference_obj.append_simulations(thetas, X)
             self.inference_obj.train()
 
-        self.posterior = self.inference_obj.build_posterior()
+        self.posterior = self.inference_obj.build_posterior(**kwargs)
         return self
 
     def compute(self, X_calib, thetas_calib, one_X=False):
@@ -106,7 +106,7 @@ class HPDScore(sbi_Scores):
 
 # Waldo score
 class WALDOScore(sbi_Scores):
-    def fit(self, X=None, thetas=None):
+    def fit(self, X=None, thetas=None, **kwargs):
         # setting up model for SBI package
         if not self.is_fitted:
             if not isinstance(X, torch.Tensor) or X.dtype != torch.float32:
@@ -116,7 +116,7 @@ class WALDOScore(sbi_Scores):
             self.inference_obj.append_simulations(thetas, X)
             self.inference_obj.train()
 
-        self.posterior = self.inference_obj.build_posterior()
+        self.posterior = self.inference_obj.build_posterior(**kwargs)
         return self
 
     def compute(self, X_calib, thetas_calib, one_X=False, B=1000):
