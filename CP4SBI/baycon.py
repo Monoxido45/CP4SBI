@@ -565,7 +565,6 @@ class CDFSplit(BaseEstimator):
         else:
             # first deriving the local cutoffs
             leaves_idx = self.cart.apply(X_test.numpy())
-            print(leaves_idx)
             cutoffs_local = np.array(itemgetter(*leaves_idx)(self.cutoffs))
 
             for X in tqdm(X_test, desc="Computting local CDF-based cutoffs"):

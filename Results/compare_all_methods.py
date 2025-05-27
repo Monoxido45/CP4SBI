@@ -300,8 +300,9 @@ def compute_coverage(
     simulator = task.get_simulator()
 
     # setting seet
-    torch.manual_seed(random_seed)
-    torch.cuda.manual_seed(random_seed)
+    if not task_name == "gaussian_mixture":
+        torch.manual_seed(random_seed)
+        torch.cuda.manual_seed(random_seed)
 
     # checking if X_list is None or not
     # splitting simulation budget
@@ -625,6 +626,9 @@ def compute_coverage_repeated(
 
     # Start the loop from the length of the checkpoint list
     start_index = len(coverage_results)
+    if task_name == "gaussian_mixture":
+        torch.manual_seed(central_seed)
+        torch.cuda.manual_seed(central_seed)
 
     # Adjust the loop to start from the start_index
     for j, seed in enumerate(
