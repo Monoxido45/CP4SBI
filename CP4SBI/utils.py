@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-import tqdm
+from tqdm import tqdm
 from CP4SBI.scores import HPDScore
 
 
@@ -123,9 +123,6 @@ def hdr_alpha(query_val, base_pdf_values):
     rank_among_pdfs = np.mean(base_pdf_values >= query_val)
 
     return rank_among_pdfs
-
-
-""" Recalibration Classes/Functions """
 
 
 class conditional_hdr_recalibration:
@@ -543,12 +540,15 @@ def hdr_method(
 
     # performing recalibration in the test set
     prob_array_test = np.zeros((X_test.shape[0], B_recal))
-    theta_samples = np.zeros((X_test.shape[0], B_recal, 2))
+    theta_samples = np.zeros((X_test.shape[0], B_recal, thetas_calib.shape[1]))
 
     i = 0
     for X in X_test:
         if len(X.shape) == 1:
             X = X.reshape(1, -1)
+
+        if not isinstance(X, torch.Tensor) or X.dtype != torch.float32:
+            X = torch.tensor(X, dtype=torch.float32)
 
         theta_pos = (
             bayes_score.posterior.sample(
@@ -572,6 +572,10 @@ def hdr_method(
 
     target_coverage = 1 - alpha
     cutoff_array = np.zeros(recal_samples.shape[0])
+
+    if score_type == "WALDO":
+        mean_list, inv_matrix_list = [], []
+
     # using the recal samples to compute each cutoff
     for i in tqdm(range(dens_recal.shape[0]), desc="Computing all cutoffs using HDR: "):
         # computing the conformal scores for each case
@@ -607,6 +611,9 @@ def hdr_method(
                         covariance_matrix
                     )
 
+            mean_list.append(mean_array)
+            inv_matrix_list.append(inv_matrix)
+
         # setting the grid to find the cutoff
         if n_grid is None:
             t_grid = np.arange(
@@ -631,6 +638,6 @@ def hdr_method(
         cutoff_array[i] = t_grid[closest_t_index]
 
     if score_type == "WALDO":
-        return cutoff_array, mean_array, inv_matrix
+        return cutoff_array, chdr_obj, mean_list, inv_matrix_list
     else:
-        return cutoff_array
+        return cutoff_array, chdr_obj

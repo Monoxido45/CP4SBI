@@ -6,7 +6,7 @@ from CP4SBI.baycon import BayCon
 from CP4SBI.scores import HPDScore, WALDOScore
 from sbi.utils.user_input_checks import process_prior
 from sbi.utils import MultipleIndependent
-from CP4SBI.utils import naive_method
+from CP4SBI.utils import naive_method, hdr_method
 
 # for benchmarking
 import sbibm
@@ -464,6 +464,7 @@ def compute_coverage(
     coverage_naive = np.zeros(num_obs)
     coverage_local_cdf = np.zeros(num_obs)
     coverage_a_locart = np.zeros(num_obs)
+    coverage_hdr = np.zeros(num_obs)
 
     # Load the dictionary from the pickle file
     posterior_data_path = (
@@ -479,14 +480,40 @@ def compute_coverage(
     local_cdf_cutoff = local_cdf_conf.predict_cutoff(X_obs)
     alocart_cutoff = w_bayes_conf.predict_cutoff(X_obs)
 
+    post_estim = deepcopy(bayes_conf.locart.sbi_score.posterior)
+
+    # HDR recalibration
+    print("Fitting HDR recalibration")
+    if score_type == "HPD":
+        hdr_cutoff, hdr_obj = hdr_method(
+            post_estim=inference,
+            X_calib=X_calib,
+            thetas_calib=thetas_calib,
+            n_grid=1000,
+            X_test=X_obs,
+            is_fitted=True,
+            alpha=alpha,
+            score_type=score_type,
+            device=device,
+        )
+    else:
+        hdr_cutoff, hdr_obj, mean_list, inv_matrix_list = hdr_method(
+            post_estim=inference,
+            X_calib=X_calib,
+            thetas_calib=thetas_calib,
+            n_grid=1000,
+            X_test=X_obs,
+            is_fitted=True,
+            alpha=alpha,
+            score_type=score_type,
+            device=device,
+        )
+
     i = 0
     dict_keys = list(X_dict.keys())
     # evaluating cutoff for each observation
     for X_0 in tqdm(dict_keys, desc="Computing coverage across observations"):
         post_samples = X_dict[X_0]
-
-        # computing naive cutoff
-        post_estim = deepcopy(bayes_conf.locart.sbi_score.posterior)
 
         if score_type == "HPD":
             # computing naive cutoff
@@ -513,11 +540,10 @@ def compute_coverage(
                     device=device,
                     B_naive=naive_samples,
                 )
-
             if len(X_0.shape) == 1:
                 X_0 = X_0.reshape(1, -1)
 
-            # computing scores
+            # computing scores for naive, locart, global, cdf, local_cdf, and alocart
             conf_scores = -np.exp(
                 post_estim.log_prob(
                     post_samples.to(device=device),
@@ -526,6 +552,19 @@ def compute_coverage(
                 .cpu()
                 .numpy()
             )
+            # computing scores for HDR
+
+            _, dens_samples = hdr_obj.recal_sample(
+                y_hat=post_samples.reshape(
+                    1,
+                    post_samples.shape[0],
+                    post_samples.shape[1],
+                ),
+                f_hat_y_hat=-conf_scores.reshape(1, -1),
+            )
+
+            hdr_conf_scores = -dens_samples[0, :]
+
         elif score_type == "WALDO":
             # computing naive cutoff
             if (
@@ -552,7 +591,7 @@ def compute_coverage(
                     B_naive=naive_samples,
                 )
 
-            # computing scores
+            # computing scores for naive, locart, global, cdf, local_cdf, and alocart
             conf_scores = np.zeros(post_samples.shape[0])
             for j in range(post_samples.shape[0]):
                 if mean_array.shape[0] > 1:
@@ -566,6 +605,42 @@ def compute_coverage(
                     sel_sample = post_samples[j].cpu().numpy()
                     conf_scores[j] = (mean_array - sel_sample) ** 2 / (inv_matrix)
 
+            # obtaining recalibrated samples first
+            prob_post = np.exp(
+                post_estim.log_prob(
+                    post_samples.to(device=device),
+                    x=X_0.to(device=device),
+                )
+                .cpu()
+                .numpy()
+            )
+
+            rec_post_samples, _ = hdr_obj.recal_sample(
+                y_hat=post_samples.reshape(
+                    1,
+                    post_samples.shape[0],
+                    post_samples.shape[1],
+                ),
+                f_hat_y_hat=prob_post.reshape(1, -1),
+            )
+            rec_post_samples = rec_post_samples[0, :, :]
+            hdr_mean = mean_list[i]
+            hdr_inv_matrix = inv_matrix_list[i]
+
+            # computing scores for HDR
+            hdr_conf_scores = np.zeros(rec_post_samples.shape[0])
+            for j in range(rec_post_samples.shape[0]):
+                if hdr_mean.shape[0] > 1:
+                    sel_sample = rec_post_samples[j, :].cpu().numpy()
+                    hdr_conf_scores[j] = (
+                        (hdr_mean - sel_sample).transpose()
+                        @ hdr_inv_matrix
+                        @ (hdr_mean - sel_sample)
+                    )
+                else:
+                    sel_sample = rec_post_samples[j].cpu().numpy()
+                    hdr_conf_scores[j] = (hdr_mean - sel_sample) ** 2 / (hdr_inv_matrix)
+
         # computing coverage
         coverage_locart[i] = np.mean(conf_scores <= locart_cutoff[i])
         coverage_global[i] = np.mean(conf_scores <= global_cutoff[i])
@@ -573,6 +648,7 @@ def compute_coverage(
         coverage_cdf[i] = np.mean(conf_scores <= cdf_cutoff[i])
         coverage_local_cdf[i] = np.mean(conf_scores <= local_cdf_cutoff[i])
         coverage_a_locart[i] = np.mean(conf_scores <= alocart_cutoff[i])
+        coverage_hdr[i] = np.mean(hdr_conf_scores <= hdr_cutoff[i])
 
         i += 1
 
@@ -585,6 +661,7 @@ def compute_coverage(
             "Naive MAD": [np.mean(np.abs(coverage_naive - (1 - alpha)))],
             "CDF MAD": [np.mean(np.abs(coverage_cdf - (1 - alpha)))],
             "Local CDF MAD": [np.mean(np.abs(coverage_local_cdf - (1 - alpha)))],
+            "HDR MAD": [np.mean(np.abs(coverage_hdr - (1 - alpha)))],
         }
     )
     return coverage_df
