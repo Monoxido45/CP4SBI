@@ -7,9 +7,19 @@ import os
 import pickle
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--task", "-d", help="string for SBI task", default="two_moons")
 parser.add_argument(
-    "--seed", "-s", help="int for random seed to be fixed", default=45, type=int
+    "--task",
+    "-d",
+    help="string for SBI task",
+    default="two_moons",
+    type=str,
+)
+parser.add_argument(
+    "--seed",
+    "-s",
+    help="int for random seed to be fixed",
+    default=45,
+    type=int,
 )
 parser.add_argument(
     "--n_samples",
@@ -45,7 +55,13 @@ task = sbibm.get_task(task_name)
 simulator = task.get_simulator()
 prior = task.get_prior()
 
-if task_name == "slcp" or task_name == "sir" or task_name == "lotka_volterra":
+if (
+    task_name == "slcp"
+    or task_name == "sir"
+    or task_name == "lotka_volterra"
+    or task_name == "bernoulli_glm"
+    or task_name == "gaussian_mixture"
+):
     n_x = 10
 else:
     n_x = args.n_x
@@ -70,11 +86,7 @@ else:
 
 # Generate samples for each X
 for j in tqdm(range(i, n_x), desc="Generating samples for each X"):
-    if (
-        task.name == "gaussian_linear_uniform"
-        or task.name == "gaussian_linear"
-        or task.name == "gaussian_mixture"
-    ):
+    if task.name == "gaussian_linear_uniform" or task.name == "gaussian_linear":
         X = X_obs[j]
         post_dict[X.reshape(1, -1)] = task._sample_reference_posterior(
             num_samples=n_samples,
@@ -85,6 +97,7 @@ for j in tqdm(range(i, n_x), desc="Generating samples for each X"):
         or task.name == "sir"
         or task.name == "lotka_volterra"
         or task.name == "bernoulli_glm"
+        or task.name == "gaussian_mixture"
     ):
         X = task.get_observation(num_observation=j + 1)
         post_dict[X] = task.get_reference_posterior_samples(
