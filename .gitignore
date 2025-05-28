@@ -5,3 +5,5 @@ Experiments/sbi-logs/
 /CP4SBI/__pycache__/
 /sbi-logs/
 /tensorboard/
+Results/sbi-logs/NPE_C
+Results/__pycache__/
