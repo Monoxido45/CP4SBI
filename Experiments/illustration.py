@@ -98,7 +98,7 @@ target_coverage = 0.9
 torch.manual_seed(45)
 torch.cuda.manual_seed(45)
 # first X_obs
-theta_real = torch.tensor([[0.2, -0.6], [-0.3, 0.6]])
+theta_real = torch.tensor([[0.1, -0.3], [-0.3, 0.7]])
 # generating X_obs
 X_obs = simulator(theta_real)
 
@@ -208,8 +208,8 @@ axes[0, 0].imshow(
 axes[0, 0].set_title("LOCART Region (Obs 1)", fontweight="bold")
 axes[0, 0].set_xlabel("")
 axes[0, 0].set_ylabel(r"$\theta_2$")
-axes[0, 0].set_xlim(0.1, 0.85)
-axes[0, 0].set_ylim(-0.8, -0.15)
+axes[0, 0].set_xlim(0, 0.5)
+axes[0, 0].set_ylim(-0.5, -0.045)
 
 # Global region for first observation
 axes[0, 1].imshow(
@@ -218,8 +218,8 @@ axes[0, 1].imshow(
 axes[0, 1].set_title("Global Region (Obs 1)")
 axes[0, 1].set_xlabel("")
 axes[0, 1].set_ylabel("")
-axes[0, 1].set_xlim(0.1, 0.85)
-axes[0, 1].set_ylim(-0.8, -0.15)
+axes[0, 1].set_xlim(0, 0.5)
+axes[0, 1].set_ylim(-0.5, -0.045)
 
 # Naive region for first observation
 axes[0, 2].imshow(
@@ -228,8 +228,8 @@ axes[0, 2].imshow(
 axes[0, 2].set_title("Naive Region (Obs 1)")
 axes[0, 2].set_xlabel("")
 axes[0, 2].set_ylabel("")
-axes[0, 2].set_xlim(0.1, 0.85)
-axes[0, 2].set_ylim(-0.8, -0.15)
+axes[0, 2].set_xlim(0, 0.5)
+axes[0, 2].set_ylim(-0.5, -0.045)
 
 # LOCART region for second observation
 axes[1, 0].imshow(
@@ -238,8 +238,8 @@ axes[1, 0].imshow(
 axes[1, 0].set_title("LOCART Region (Obs 2)", fontweight="bold")
 axes[1, 0].set_xlabel(r"$\theta_1$")
 axes[1, 0].set_ylabel(r"$\theta_2$")
-axes[1, 0].set_xlim(-0.85, -0.1)
-axes[1, 0].set_ylim(0.2, 0.8)
+axes[1, 0].set_xlim(-0.95, -0.15)
+axes[1, 0].set_ylim(0.2, 0.9)
 
 # Global region for second observation
 axes[1, 1].imshow(
@@ -248,8 +248,8 @@ axes[1, 1].imshow(
 axes[1, 1].set_title("Global Region (Obs 2)")
 axes[1, 1].set_xlabel(r"$\theta_1$")
 axes[1, 1].set_ylabel("")
-axes[1, 1].set_xlim(-0.85, -0.1)
-axes[1, 1].set_ylim(0.2, 0.8)
+axes[1, 1].set_xlim(-0.95, -0.15)
+axes[1, 1].set_ylim(0.2, 0.9)
 
 # Naive region for second observation
 axes[1, 2].imshow(
@@ -258,8 +258,8 @@ axes[1, 2].imshow(
 axes[1, 2].set_title("Naive Region (Obs 2)")
 axes[1, 2].set_xlabel(r"$\theta_1$")
 axes[1, 2].set_ylabel("")
-axes[1, 2].set_xlim(-0.85, -0.1)
-axes[1, 2].set_ylim(0.2, 0.8)
+axes[1, 2].set_xlim(-0.95, -0.15)
+axes[1, 2].set_ylim(0.2, 0.9)
 
 # Set global xlim and ylim for all subplots
 plt.tight_layout()
