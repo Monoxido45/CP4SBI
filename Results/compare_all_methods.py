@@ -158,25 +158,25 @@ else:
     prior = task.get_prior()
 
 
-if task.name == "two_moons":
+if task_name == "two_moons":
     prior_NPE = BoxUniform(
         low=-1 * torch.ones(2),
         high=1 * torch.ones(2),
         device=device,
     )
-elif task.name == "gaussian_linear_uniform":
+elif task_name == "gaussian_linear_uniform":
     prior_NPE = BoxUniform(
         low=-1 * torch.ones(10),
         high=1 * torch.ones(10),
         device=device,
     )
-elif task.name == "slcp":
+elif task_name == "slcp":
     prior_NPE = BoxUniform(
         low=-3 * torch.ones(5),
         high=3 * torch.ones(5),
         device=device,
     )
-elif task.name == "gaussian_linear":
+elif task_name == "gaussian_linear":
     prior_params = {
         "loc": torch.zeros((task.dim_parameters,), device=device),
         "precision_matrix": torch.inverse(
@@ -188,7 +188,7 @@ elif task.name == "gaussian_linear":
         validate_args=False,
     )
     prior_NPE, _, _ = process_prior(prior_dist)
-elif task.name == "bernoulli_glm":
+elif task_name == "bernoulli_glm":
     dim_parameters = 10
     # parameters for the prior distribution
     M = dim_parameters - 1
@@ -213,14 +213,14 @@ elif task.name == "bernoulli_glm":
         validate_args=False,
     )
     prior_NPE, _, _ = process_prior(prior_dist)
-elif task.name == "gaussian_mixture":
+elif task_name == "gaussian_mixture":
     prior_NPE = BoxUniform(
         low=-10 * torch.ones(2),
         high=10 * torch.ones(2),
         device=device,
     )
 
-elif task.name == "sir":
+elif task_name == "sir":
     prior_list = [
         LogNormal(
             loc=torch.tensor([math.log(0.4)], device=device),
@@ -235,7 +235,7 @@ elif task.name == "sir":
     ]
     prior_dist = MultipleIndependent(prior_list, validate_args=False)
     prior_NPE, _, _ = process_prior(prior_dist)
-elif task.name == "lotka_volterra":
+elif task_name == "lotka_volterra":
     mu_p1 = -0.125
     mu_p2 = -3.0
     sigma_p = 0.5
@@ -268,21 +268,6 @@ elif task.name == "lotka_volterra":
     ]
     prior_dist = MultipleIndependent(prior_list, validate_args=False)
     prior_NPE, _, _ = process_prior(prior_dist)
-
-
-# unused simulators
-# elif task.name == "bernoulli_glm":
-# setting parameters for prior distribution
-#    M = task.dim_parameters - 1
-#    D = torch.diag(torch.ones(M)) - torch.diag(torch.ones(M - 1), -1)
-#    F = torch.matmul(D, D) + torch.diag(1.0 * torch.arange(M) / (M)) ** 0.5
-#    Binv = torch.zeros(size=(M + 1, M + 1))
-#    Binv[0, 0] = 0.5  # offset
-#    Binv[1:, 1:] = torch.matmul(F.T, F)
-# setting up prior distribution using torch
-#    prior_params = {"loc": torch.zeros((M + 1,)), "precision_matrix": Binv}
-#    prior_dist = MultivariateNormal(**prior_params, validate_args=False)
-#    prior_NPE, _, _ = process_prior(prior_dist)
 
 
 def compute_coverage(

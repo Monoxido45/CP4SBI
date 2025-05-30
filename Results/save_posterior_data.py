@@ -77,9 +77,9 @@ else:
     theta_obs = prior(num_samples=n_x)
     X_obs = simulator(theta_obs)
 
-# Print the minimum and maximum of X_obs
-print("Minimum of X_obs:", X_obs.min())
-print("Maximum of X_obs:", X_obs.max())
+    # Print the minimum and maximum of X_obs
+    print("Minimum of X_obs:", X_obs.min())
+    print("Maximum of X_obs:", X_obs.max())
 
 # creating the directory to save the results
 save_dir = f"Results/posterior_data/"
@@ -114,6 +114,8 @@ for j in tqdm(range(i, n_x), desc="Generating samples for each X"):
         or task_name == "sir"
         or task_name == "lotka_volterra"
         or task_name == "bernoulli_glm"
+        or task_name == "bernoulli_glm_raw"
+        or task_name == "slcp_distractors"
     ):
         X = task.get_observation(num_observation=j + 1)
         post_dict[X] = task.get_reference_posterior_samples(
@@ -137,5 +139,5 @@ if os.path.exists(checkpoint_path):
     os.remove(checkpoint_path)
 
 # Save the posterior samples to a pickle file
-with open(os.path.join(save_dir, f"{task.name}_posterior_samples.pkl"), "wb") as f:
+with open(os.path.join(save_dir, f"{task_name}_posterior_samples.pkl"), "wb") as f:
     pickle.dump(post_dict, f)

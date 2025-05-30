@@ -98,10 +98,10 @@ for j in tqdm(range(i, n_replica)):
         pickle.dump(theta_obs_list, checkpoint_file)
 
 # Saving samples
-with open(os.path.join(save_dir, f"{task.name}_X_samples_{B}.pkl"), "wb") as f:
+with open(os.path.join(save_dir, f"{task_name}_X_samples_{B}.pkl"), "wb") as f:
     pickle.dump(X_obs_list, f)
 
-with open(os.path.join(save_dir, f"{task.name}_theta_samples_{B}.pkl"), "wb") as f:
+with open(os.path.join(save_dir, f"{task_name}_theta_samples_{B}.pkl"), "wb") as f:
     pickle.dump(theta_obs_list, f)
 
 # removing checkpoint file
