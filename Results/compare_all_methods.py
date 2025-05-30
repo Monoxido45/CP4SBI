@@ -146,9 +146,17 @@ else:
 alpha = 0.1
 
 # Load the SBI task, simulator, and prior
-task = sbibm.get_task(task_name)
-simulator = task.get_simulator()
-prior = task.get_prior()
+if task_name != "gaussian_mixture":
+    task = sbibm.get_task(task_name)
+    simulator = task.get_simulator()
+    prior = task.get_prior()
+else:
+    from CP4SBI.gmm_task import GaussianMixture
+
+    task = GaussianMixture(dim=2, prior_bound=10.0)
+    simulator = task.get_simulator()
+    prior = task.get_prior()
+
 
 if task.name == "two_moons":
     prior_NPE = BoxUniform(
