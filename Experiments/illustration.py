@@ -16,6 +16,7 @@ from CP4SBI.utils import conditional_hdr_recalibration, hdr_method, naive_method
 # testing naive
 import sbibm
 from sklearn.neighbors import KernelDensity
+from matplotlib.lines import Line2D
 
 original_path = os.getcwd()
 device = "cuda"
@@ -106,6 +107,12 @@ X_obs = simulator(theta_real)
 global_cutoff = global_conf.predict_cutoff(X_obs)
 locart_cutoff = bayes_conf.predict_cutoff(X_obs)
 naive_cutoff = np.zeros(X_obs.shape[0])
+oracle_cutoff = np.zeros(X_obs.shape[0])
+dif_cutoff_locart, dif_cutoff_global, dif_cutoff_naive = (
+    np.zeros(X_obs.shape[0]),
+    np.zeros(X_obs.shape[0]),
+    np.zeros(X_obs.shape[0]),
+)
 
 post_samples_list = []
 i = 0
@@ -139,25 +146,40 @@ for X in X_obs:
         .numpy()
     )
 
+    # computing oracle cutoff
+    t_grid = np.arange(
+        np.min(conf_scores),
+        np.max(conf_scores),
+        0.05,
+    )
+
+    # computing MC integral for all t_grid
+    coverage_array = np.zeros(t_grid.shape[0])
+    for t in t_grid:
+        coverage_array[t_grid == t] = np.mean(conf_scores <= t)
+
+    closest_t_index = np.argmin(np.abs(coverage_array - target_coverage))
+    # finally, finding the naive cutoff
+    oracle_cutoff[i] = t_grid[closest_t_index]
+
     coverage_locart = np.mean(conf_scores < locart_cutoff[i])
     coverage_global = np.mean(conf_scores < global_cutoff[i])
     coverage_naive = np.mean(conf_scores < naive_cutoff[i])
 
-    # Compute Mean Absolute Deviation (MAD) versus target coverage
-    mad_locart = np.abs(coverage_locart - target_coverage)
-    mad_global = np.abs(coverage_global - target_coverage)
-    mad_naive = np.abs(coverage_naive - target_coverage)
+    dif_cutoff_locart[i] = np.abs(locart_cutoff[i] - oracle_cutoff[i])
+    dif_cutoff_global[i] = np.abs(global_cutoff[i] - oracle_cutoff[i])
+    dif_cutoff_naive[i] = np.abs(naive_cutoff[i] - oracle_cutoff[i])
 
-    print(f"MAD LOCART: {mad_locart}")
-    print(f"MAD Global: {mad_global}")
-    print(f"MAD Naive: {mad_naive}")
+    print(f"Coverage LOCART: {coverage_locart}")
+    print(f"Coverage Global: {coverage_global}")
+    print(f"Coverage Naive: {coverage_naive}")
     i += 1
 
 
 ############################### Obtaining the credible regions
 # generating grid of thetas
-theta1 = torch.linspace(-1, 1, 1000)
-theta2 = torch.linspace(-1, 1, 1000)
+theta1 = torch.linspace(-1, 1, 3000)
+theta2 = torch.linspace(-1, 1, 3000)
 theta_grid = torch.cartesian_prod(theta1, theta2)
 
 # Compute log probabilities for both observations
@@ -183,84 +205,197 @@ log_probs_obs2 = np.exp(
 locart_mask_obs1 = -log_probs_obs1 < locart_cutoff[0]
 global_mask_obs1 = -log_probs_obs1 < global_cutoff[0]
 naive_mask_obs1 = -log_probs_obs1 < naive_cutoff[0]
+real_mask_obs1 = -log_probs_obs1 < oracle_cutoff[0]
 
 locart_mask_obs2 = -log_probs_obs2 < locart_cutoff[1]
 global_mask_obs2 = -log_probs_obs2 < global_cutoff[1]
 naive_mask_obs2 = -log_probs_obs2 < naive_cutoff[1]
+real_mask_obs2 = -log_probs_obs2 < oracle_cutoff[1]
 
 # Reshape masks for plotting
 locart_mask_obs1 = locart_mask_obs1.reshape(len(theta1), len(theta2))
 global_mask_obs1 = global_mask_obs1.reshape(len(theta1), len(theta2))
 naive_mask_obs1 = naive_mask_obs1.reshape(len(theta1), len(theta2))
+real_mask_obs1 = real_mask_obs1.reshape(len(theta1), len(theta2))
 
 locart_mask_obs2 = locart_mask_obs2.reshape(len(theta1), len(theta2))
 global_mask_obs2 = global_mask_obs2.reshape(len(theta1), len(theta2))
 naive_mask_obs2 = naive_mask_obs2.reshape(len(theta1), len(theta2))
+real_mask_obs2 = real_mask_obs2.reshape(len(theta1), len(theta2))
 
 # Update the plot layout to 2 rows and 3 columns
 fig, axes = plt.subplots(2, 3, figsize=(18, 10))
 plt.rcParams.update({"font.size": 14})
 
-# LOCART region for first observation
-axes[0, 0].imshow(
-    locart_mask_obs1.T, extent=(-1, 1, -1, 1), origin="lower", cmap="Blues", alpha=0.7
+# Add subtitles for the LOCART plots
+axes[0, 0].annotate(
+    "First Observation",
+    xy=(0.1, 1.15),
+    xycoords="axes fraction",
+    fontsize=18,
+    fontweight="bold",
+    ha="center",
+    va="center",
+    annotation_clip=False,
 )
-axes[0, 0].set_title("LOCART Region (Obs 1)", fontweight="bold")
+
+axes[1, 0].set_title("", loc="left")
+axes[1, 0].annotate(
+    "Second Observation",
+    xy=(0.15, 1.15),
+    xycoords="axes fraction",
+    fontsize=18,
+    fontweight="bold",
+    ha="center",
+    va="center",
+    annotation_clip=False,
+)
+
+# Add a legend for the oracle region above all subplots
+# LOCART region for first observation
+axes[0, 0].contour(
+    real_mask_obs1.T,
+    levels=[0.5],
+    extent=(-1, 1, -1, 1),
+    colors="black",
+    linewidths=1.5,
+)
+axes[0, 0].imshow(
+    locart_mask_obs1.T,
+    extent=(-1, 1, -1, 1),
+    origin="lower",
+    cmap="Blues",
+    alpha=0.6,
+)
+axes[0, 0].set_title("LOCART (our approach)", fontweight="bold", color="blue")
 axes[0, 0].set_xlabel("")
 axes[0, 0].set_ylabel(r"$\theta_2$")
-axes[0, 0].set_xlim(0, 0.5)
+axes[0, 0].set_xlim(-0.025, 0.5)
 axes[0, 0].set_ylim(-0.5, -0.045)
 
 # Global region for first observation
-axes[0, 1].imshow(
-    global_mask_obs1.T, extent=(-1, 1, -1, 1), origin="lower", cmap="Greens", alpha=0.7
+axes[0, 1].contour(
+    real_mask_obs1.T,
+    levels=[0.5],
+    extent=(-1, 1, -1, 1),
+    colors="black",
+    linewidths=1.5,
 )
-axes[0, 1].set_title("Global Region (Obs 1)")
+axes[0, 1].imshow(
+    global_mask_obs1.T,
+    extent=(-1, 1, -1, 1),
+    origin="lower",
+    cmap="Greens",
+    alpha=0.6,
+)
+axes[0, 1].set_title("Global CP", color="green")
 axes[0, 1].set_xlabel("")
 axes[0, 1].set_ylabel("")
-axes[0, 1].set_xlim(0, 0.5)
+axes[0, 1].set_xlim(-0.025, 0.5)
 axes[0, 1].set_ylim(-0.5, -0.045)
 
 # Naive region for first observation
-axes[0, 2].imshow(
-    naive_mask_obs1.T, extent=(-1, 1, -1, 1), origin="lower", cmap="Reds", alpha=0.7
+axes[0, 2].contour(
+    real_mask_obs1.T,
+    levels=[0.5],
+    extent=(-1, 1, -1, 1),
+    colors="black",
+    linewidths=1.5,
 )
-axes[0, 2].set_title("Naive Region (Obs 1)")
+axes[0, 2].imshow(
+    naive_mask_obs1.T,
+    extent=(-1, 1, -1, 1),
+    origin="lower",
+    cmap="Reds",
+    alpha=0.6,
+)
+axes[0, 2].set_title("Naive", color="red")
 axes[0, 2].set_xlabel("")
 axes[0, 2].set_ylabel("")
-axes[0, 2].set_xlim(0, 0.5)
+axes[0, 2].set_xlim(-0.025, 0.5)
 axes[0, 2].set_ylim(-0.5, -0.045)
 
 # LOCART region for second observation
-axes[1, 0].imshow(
-    locart_mask_obs2.T, extent=(-1, 1, -1, 1), origin="lower", cmap="Blues", alpha=0.7
+axes[1, 0].contour(
+    real_mask_obs2.T,
+    levels=[0.5],
+    extent=(-1, 1, -1, 1),
+    colors="black",
+    linewidths=1.5,
 )
-axes[1, 0].set_title("LOCART Region (Obs 2)", fontweight="bold")
+axes[1, 0].imshow(
+    locart_mask_obs2.T,
+    extent=(-1, 1, -1, 1),
+    origin="lower",
+    cmap="Blues",
+    alpha=0.6,
+)
+axes[1, 0].set_title("")
 axes[1, 0].set_xlabel(r"$\theta_1$")
 axes[1, 0].set_ylabel(r"$\theta_2$")
 axes[1, 0].set_xlim(-0.95, -0.15)
 axes[1, 0].set_ylim(0.2, 0.9)
 
 # Global region for second observation
-axes[1, 1].imshow(
-    global_mask_obs2.T, extent=(-1, 1, -1, 1), origin="lower", cmap="Greens", alpha=0.7
+axes[1, 1].contour(
+    real_mask_obs2.T,
+    levels=[0.5],
+    extent=(-1, 1, -1, 1),
+    colors="black",
+    linewidths=1.5,
 )
-axes[1, 1].set_title("Global Region (Obs 2)")
+axes[1, 1].imshow(
+    global_mask_obs2.T,
+    extent=(-1, 1, -1, 1),
+    origin="lower",
+    cmap="Greens",
+    alpha=0.6,
+)
+axes[1, 1].set_title("")
 axes[1, 1].set_xlabel(r"$\theta_1$")
 axes[1, 1].set_ylabel("")
 axes[1, 1].set_xlim(-0.95, -0.15)
 axes[1, 1].set_ylim(0.2, 0.9)
 
 # Naive region for second observation
-axes[1, 2].imshow(
-    naive_mask_obs2.T, extent=(-1, 1, -1, 1), origin="lower", cmap="Reds", alpha=0.7
+axes[1, 2].contour(
+    real_mask_obs2.T,
+    levels=[0.5],
+    extent=(-1, 1, -1, 1),
+    colors="black",
+    linewidths=1.5,
 )
-axes[1, 2].set_title("Naive Region (Obs 2)")
+axes[1, 2].imshow(
+    naive_mask_obs2.T,
+    extent=(-1, 1, -1, 1),
+    origin="lower",
+    cmap="Reds",
+    alpha=0.6,
+)
+axes[1, 2].set_title("")
 axes[1, 2].set_xlabel(r"$\theta_1$")
 axes[1, 2].set_ylabel("")
 axes[1, 2].set_xlim(-0.95, -0.15)
 axes[1, 2].set_ylim(0.2, 0.9)
 
-# Set global xlim and ylim for all subplots
+# Add a unified legend for the contour plot above all subplots
+
+# Create a custom legend for the oracle region
+legend_elements = [
+    Line2D([0], [0], color="black", lw=1.5, label="Oracle Region"),
+]
+
+fig.subplots_adjust(top=0.85)  # Adjust the top margin to make space for the legend
+fig.legend(
+    handles=legend_elements,
+    loc="upper center",
+    bbox_to_anchor=(0.5, 1.04),
+    fontsize=18,
+    frameon=True,
+)
+
 plt.tight_layout()
-plt.show()
+plt.savefig(
+    "illustration_locart",
+    bbox_inches="tight",
+)
