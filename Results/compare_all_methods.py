@@ -188,7 +188,7 @@ elif task_name == "gaussian_linear":
         validate_args=False,
     )
     prior_NPE, _, _ = process_prior(prior_dist)
-elif task_name == "bernoulli_glm":
+elif task_name == "bernoulli_glm" or "bernoulli_glm_raw":
     dim_parameters = 10
     # parameters for the prior distribution
     M = dim_parameters - 1
