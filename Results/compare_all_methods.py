@@ -489,7 +489,7 @@ def compute_coverage(
             score_type=score_type,
             device=device,
         )
-    else:
+    elif score_type == "WALDO":
         hdr_cutoff, hdr_obj, mean_list, inv_matrix_list = hdr_method(
             post_estim=inference,
             X_calib=X_calib,
@@ -598,6 +598,7 @@ def compute_coverage(
                     sel_sample = post_samples[j].cpu().numpy()
                     conf_scores[j] = (mean_array - sel_sample) ** 2 / (inv_matrix)
 
+            # obtaining conf_scores for the recalibration approach
             # obtaining recalibrated samples first
             prob_post = np.exp(
                 post_estim.log_prob(
@@ -624,14 +625,14 @@ def compute_coverage(
             hdr_conf_scores = np.zeros(rec_post_samples.shape[0])
             for j in range(rec_post_samples.shape[0]):
                 if hdr_mean.shape[0] > 1:
-                    sel_sample = rec_post_samples[j, :].cpu().numpy()
+                    sel_sample = rec_post_samples[j, :]
                     hdr_conf_scores[j] = (
                         (hdr_mean - sel_sample).transpose()
                         @ hdr_inv_matrix
                         @ (hdr_mean - sel_sample)
                     )
                 else:
-                    sel_sample = rec_post_samples[j].cpu().numpy()
+                    sel_sample = rec_post_samples[j]
                     hdr_conf_scores[j] = (hdr_mean - sel_sample) ** 2 / (hdr_inv_matrix)
 
         # computing coverage

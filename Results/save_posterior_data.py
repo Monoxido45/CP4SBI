@@ -51,7 +51,6 @@ np.random.seed(seed)
 
 
 # Load the SBI task, simulator, and prior
-# Load the SBI task, simulator, and prior
 if task_name != "gaussian_mixture":
     task = sbibm.get_task(task_name)
     simulator = task.get_simulator()
@@ -62,6 +61,7 @@ else:
     task = GaussianMixture(dim=2, prior_bound=10.0)
     simulator = task.get_simulator()
     prior = task.get_prior()
+
 
 if (
     task_name == "slcp"

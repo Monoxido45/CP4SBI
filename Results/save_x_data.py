@@ -80,7 +80,6 @@ if os.path.exists(checkpoint_path):
 else:
     i = 0
 
-
 # simulating theta and X observed
 for j in tqdm(range(i, n_replica)):
     # generating theta and X observed
