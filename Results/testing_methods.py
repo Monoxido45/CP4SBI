@@ -42,6 +42,12 @@ column_means = df.mean()
 print("Column means:")
 print(column_means)
 
+# Compute standard deviation divided by square root of the length of the list
+std_error = df.std() / np.sqrt(len(df))
+
+print("Standard error:")
+print(std_error)
+
 ###############################################################
 # part of the code to debug code
 torch.manual_seed(75)
