@@ -599,15 +599,15 @@ def hdr_method(
             # computing waldo scores for each estimated posterior sample
             for j in range(samples.shape[0]):
                 if mean_array.shape[0] > 1:
-                    sample_fixed = samples[j, :].cpu().numpy()
-                    conf_scores[i] = (
+                    sample_fixed = samples[j, :]
+                    conf_scores[j] = (
                         (mean_array - sample_fixed).transpose()
                         @ inv_matrix
                         @ (mean_array - sample_fixed)
                     )
                 else:
-                    sample_fixed = samples[j].cpu().numpy()
-                    conf_scores[i] = (mean_array - samples[i]) ** 2 / (
+                    sample_fixed = samples[j]
+                    conf_scores[j] = (mean_array - samples[i]) ** 2 / (
                         covariance_matrix
                     )
 

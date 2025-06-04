@@ -7,7 +7,6 @@ from sklearn.base import BaseEstimator, clone
 from sklearn.metrics import mean_squared_error
 from sklearn.model_selection import train_test_split
 from sklearn.tree import DecisionTreeRegressor, plot_tree
-from sklearn.ensemble import RandomForestRegressor
 from operator import itemgetter
 
 from tqdm import tqdm
@@ -60,14 +59,19 @@ class LocartInf(BaseEstimator):
 
     def fit(self, X, theta, **kwargs):
         """
-        Fit base model embeded in the conformal score class to the training set.
-        --------------------------------------------------------
-
-        Input: (i)    X: Training numpy feature matrix
-               (ii)   theta: Training parameters array
-                (iii)  **kwargs: Keyword arguments to be passed to the direct_posterior function.
-
-        Output: LocartSplit object
+        Fits the base model embedded in the conformal score class to the training dataset.
+        Parameters:
+        -----------
+        X : numpy.ndarray
+            Training feature matrix.
+        theta : numpy.ndarray
+            Array of training parameters.
+        **kwargs : dict
+            Additional keyword arguments to be passed to the `direct_posterior` function.
+        Returns:
+        --------
+        self : LocartSplit
+            The fitted LocartSplit object.
         """
         self.sbi_score.fit(X, theta, **kwargs)
         return self

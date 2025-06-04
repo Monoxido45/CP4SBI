@@ -146,29 +146,37 @@ else:
 alpha = 0.1
 
 # Load the SBI task, simulator, and prior
-task = sbibm.get_task(task_name)
-simulator = task.get_simulator()
-prior = task.get_prior()
+if task_name != "gaussian_mixture":
+    task = sbibm.get_task(task_name)
+    simulator = task.get_simulator()
+    prior = task.get_prior()
+else:
+    from CP4SBI.gmm_task import GaussianMixture
 
-if task.name == "two_moons":
+    task = GaussianMixture(dim=2, prior_bound=4.0)
+    simulator = task.get_simulator()
+    prior = task.get_prior()
+
+
+if task_name == "two_moons":
     prior_NPE = BoxUniform(
         low=-1 * torch.ones(2),
         high=1 * torch.ones(2),
         device=device,
     )
-elif task.name == "gaussian_linear_uniform":
+elif task_name == "gaussian_linear_uniform":
     prior_NPE = BoxUniform(
         low=-1 * torch.ones(10),
         high=1 * torch.ones(10),
         device=device,
     )
-elif task.name == "slcp":
+elif task_name == "slcp":
     prior_NPE = BoxUniform(
         low=-3 * torch.ones(5),
         high=3 * torch.ones(5),
         device=device,
     )
-elif task.name == "gaussian_linear":
+elif task_name == "gaussian_linear":
     prior_params = {
         "loc": torch.zeros((task.dim_parameters,), device=device),
         "precision_matrix": torch.inverse(
@@ -180,7 +188,7 @@ elif task.name == "gaussian_linear":
         validate_args=False,
     )
     prior_NPE, _, _ = process_prior(prior_dist)
-elif task.name == "bernoulli_glm":
+elif task_name == "bernoulli_glm" or "bernoulli_glm_raw":
     dim_parameters = 10
     # parameters for the prior distribution
     M = dim_parameters - 1
@@ -205,14 +213,14 @@ elif task.name == "bernoulli_glm":
         validate_args=False,
     )
     prior_NPE, _, _ = process_prior(prior_dist)
-elif task.name == "gaussian_mixture":
+elif task_name == "gaussian_mixture":
     prior_NPE = BoxUniform(
-        low=-10 * torch.ones(2),
-        high=10 * torch.ones(2),
+        low=-4 * torch.ones(2),
+        high=4 * torch.ones(2),
         device=device,
     )
 
-elif task.name == "sir":
+elif task_name == "sir":
     prior_list = [
         LogNormal(
             loc=torch.tensor([math.log(0.4)], device=device),
@@ -227,7 +235,7 @@ elif task.name == "sir":
     ]
     prior_dist = MultipleIndependent(prior_list, validate_args=False)
     prior_NPE, _, _ = process_prior(prior_dist)
-elif task.name == "lotka_volterra":
+elif task_name == "lotka_volterra":
     mu_p1 = -0.125
     mu_p2 = -3.0
     sigma_p = 0.5
@@ -260,21 +268,6 @@ elif task.name == "lotka_volterra":
     ]
     prior_dist = MultipleIndependent(prior_list, validate_args=False)
     prior_NPE, _, _ = process_prior(prior_dist)
-
-
-# unused simulators
-# elif task.name == "bernoulli_glm":
-# setting parameters for prior distribution
-#    M = task.dim_parameters - 1
-#    D = torch.diag(torch.ones(M)) - torch.diag(torch.ones(M - 1), -1)
-#    F = torch.matmul(D, D) + torch.diag(1.0 * torch.arange(M) / (M)) ** 0.5
-#    Binv = torch.zeros(size=(M + 1, M + 1))
-#    Binv[0, 0] = 0.5  # offset
-#    Binv[1:, 1:] = torch.matmul(F.T, F)
-# setting up prior distribution using torch
-#    prior_params = {"loc": torch.zeros((M + 1,)), "precision_matrix": Binv}
-#    prior_dist = MultivariateNormal(**prior_params, validate_args=False)
-#    prior_NPE, _, _ = process_prior(prior_dist)
 
 
 def compute_coverage(
@@ -496,7 +489,7 @@ def compute_coverage(
             score_type=score_type,
             device=device,
         )
-    else:
+    elif score_type == "WALDO":
         hdr_cutoff, hdr_obj, mean_list, inv_matrix_list = hdr_method(
             post_estim=inference,
             X_calib=X_calib,
@@ -605,6 +598,7 @@ def compute_coverage(
                     sel_sample = post_samples[j].cpu().numpy()
                     conf_scores[j] = (mean_array - sel_sample) ** 2 / (inv_matrix)
 
+            # obtaining conf_scores for the recalibration approach
             # obtaining recalibrated samples first
             prob_post = np.exp(
                 post_estim.log_prob(
@@ -631,14 +625,14 @@ def compute_coverage(
             hdr_conf_scores = np.zeros(rec_post_samples.shape[0])
             for j in range(rec_post_samples.shape[0]):
                 if hdr_mean.shape[0] > 1:
-                    sel_sample = rec_post_samples[j, :].cpu().numpy()
+                    sel_sample = rec_post_samples[j, :]
                     hdr_conf_scores[j] = (
                         (hdr_mean - sel_sample).transpose()
                         @ hdr_inv_matrix
                         @ (hdr_mean - sel_sample)
                     )
                 else:
-                    sel_sample = rec_post_samples[j].cpu().numpy()
+                    sel_sample = rec_post_samples[j]
                     hdr_conf_scores[j] = (hdr_mean - sel_sample) ** 2 / (hdr_inv_matrix)
 
         # computing coverage

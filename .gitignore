@@ -7,3 +7,4 @@ Experiments/sbi-logs/
 /tensorboard/
 Results/sbi-logs/NPE_C
 Results/__pycache__/
+.Rproj.user

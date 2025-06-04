@@ -21,6 +21,7 @@ original_path = os.getcwd()
 # Path to the pickle file
 spec_path = "Results/MAE_results/HPD_lotka_volterra_checkpoints.pkl"
 
+
 # Join the original path and file path
 file_path = os.path.join(original_path, spec_path)
 # Load the pickle file
@@ -47,7 +48,6 @@ std_error = df.std() / np.sqrt(len(df))
 
 print("Standard error:")
 print(std_error)
-
 ###############################################################
 # part of the code to debug code
 torch.manual_seed(75)
@@ -63,7 +63,6 @@ prior_NPE = BoxUniform(
     high=10 * torch.ones(2),
     device=device,
 )
-
 
 if task_name in ["sclp", "sir", "lotka_volterra", "bernoulli_glm"]:
     # Load the X_list pickle file from the X_data folder
