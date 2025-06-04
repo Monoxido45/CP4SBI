@@ -60,7 +60,7 @@ class GaussianMixture(Task):
 
         # change made here in the mixture locs factor parameters
         self.simulator_params = {
-            "mixture_locs_factor": torch.tensor([0.7, 0.7]),
+            "mixture_locs_factor": torch.tensor([0.8, 0.8]),
             "mixture_scales": torch.tensor([1.0, 0.1]),
             "mixture_weights": torch.tensor([0.5, 0.5]),
         }

@@ -11,7 +11,7 @@ folder_path = os.path.join(original_path, "Results/MAE_results")
 
 # Find all files in the folder with "HPD" and "summary" in their names
 file_pattern = os.path.join(folder_path, "*HPD*summary*.csv")
-files_hpd = [f for f in glob.glob(file_pattern) if "gaussian_mixture" not in f]
+files_hpd = [f for f in glob.glob(file_pattern)]
 
 file_pattern_waldo = os.path.join(folder_path, "*WALDO*summary*.csv")
 files_waldo = [
