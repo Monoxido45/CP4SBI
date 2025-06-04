@@ -12,13 +12,14 @@ from CP4SBI.scores import HPDScore
 # testing naive
 from CP4SBI.utils import naive_method
 import sbibm
+import pandas as pd
 
 original_path = os.getcwd()
 
 ###############################################################
 # part of the code to check partial results
 # Path to the pickle file
-spec_path = "Results/MAE_results/HPD_gaussian_linear_uniform_checkpoints.pkl"
+spec_path = "Results/MAE_results/HPD_lotka_volterra_checkpoints.pkl"
 
 # Join the original path and file path
 file_path = os.path.join(original_path, spec_path)
@@ -26,6 +27,26 @@ file_path = os.path.join(original_path, spec_path)
 with open(file_path, "rb") as file:
     slcp_checkpoint = pickle.load(file)
 print(slcp_checkpoint)
+
+# Concatenate the list of DataFrames into a single DataFrame
+if isinstance(slcp_checkpoint, list) and all(
+    isinstance(df, pd.DataFrame) for df in slcp_checkpoint
+):
+    df = pd.concat(slcp_checkpoint, ignore_index=True)
+else:
+    raise ValueError("slcp_checkpoint is not a list of DataFrames")
+
+# Compute column means
+column_means = df.mean()
+
+print("Column means:")
+print(column_means)
+
+# Compute standard deviation divided by square root of the length of the list
+std_error = df.std() / np.sqrt(len(df))
+
+print("Standard error:")
+print(std_error)
 
 ###############################################################
 # part of the code to debug code
