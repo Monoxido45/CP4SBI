@@ -66,6 +66,7 @@ bayes_conf.calib(
     theta_calib=theta_calib,
 )
 
+print("Fitting II - example .............")
 # All appears to be good, now we will test and compare to the original HPD and
 # Global conformal
 ############################ Testing our framework on two moons simulator
@@ -75,6 +76,7 @@ alpha = 0.1
 torch.manual_seed(0)
 torch.cuda.manual_seed(0)
 task = sbibm.get_task("two_moons")
+n_samples = 500
 
 prior = task.get_prior()
 simulator = task.get_simulator()
@@ -90,7 +92,7 @@ post_samples_2 = task._sample_reference_posterior(
 )
 
 # training NPE with few samples
-thetas = prior(num_samples=2000)
+thetas = prior(num_samples=n_samples)
 X_train = simulator(thetas)
 
 # specifying model
@@ -98,7 +100,7 @@ inference = NPE(prior_NPE, device="cuda")
 inference.append_simulations(thetas, X_train).train()
 
 # training conformal methods with additional samples
-calib_samples = 2000
+calib_samples = 200
 thetas_calib = prior(num_samples=calib_samples)
 X_calib = simulator(thetas_calib)
 
@@ -208,7 +210,7 @@ def compute_coverage(
     num_p_samples=1000,
 ):
     # fixing task
-    task = sbibm.get_task("two_moons")
+    task = sbibm.get_task(task)
     prior = task.get_prior()
     simulator = task.get_simulator()
 
@@ -386,11 +388,13 @@ def compute_coverage(
 # defining prior for NPE
 prior_NPE = BoxUniform(low=-1 * torch.ones(2), high=1 * torch.ones(2), device="cuda")
 
+n_obs = 50
+
 # Running the function
 coverage_df = compute_coverage(
     prior_NPE,
     alpha=0.1,
-    num_obs=500,
+    num_obs=n_obs,
     task="two_moons",
     device="cuda",
     random_seed=50,
