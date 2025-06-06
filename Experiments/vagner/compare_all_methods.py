@@ -595,7 +595,9 @@ all_coverage_df = compute_coverage_repeated(
 )
 
 # Create the "MAE_results" folder if it doesn't exist
-mae_results_path = os.path.join(original_path, "Results", "MAE_results")
+mae_results_path = os.path.join(
+    original_path, "Experiments/vagner/Results", "MAE_results"
+)
 os.makedirs(mae_results_path, exist_ok=True)
 
 # Save the all_coverage_df DataFrame to a CSV file
