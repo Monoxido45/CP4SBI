@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-
+from tqdm import tqdm
 import numpy as np
 from sklearn.base import clone
 import torch
@@ -119,7 +119,7 @@ class WALDOScore(sbi_Scores):
         self.posterior = self.inference_obj.build_posterior(**kwargs)
         return self
 
-    def compute(self, X_calib, thetas_calib, one_X=False, B=1000):
+    def compute(self, X_calib, thetas_calib, one_X=False, B=1000, trace=True):
         if not isinstance(X_calib, torch.Tensor) or X_calib.dtype != torch.float32:
             X_calib = torch.tensor(X_calib, dtype=torch.float32)
         if (
@@ -132,37 +132,61 @@ class WALDOScore(sbi_Scores):
             X_calib = X_calib.to(device="cuda")
             thetas_calib = thetas_calib.to(device="cuda")
 
+        # function to compute waldo
+        def compute_waldo(B, X_calib, theta_calib):
+            sample_generated = (
+                self.posterior.sample(
+                    (B,),
+                    x=X_calib,
+                    show_progress_bars=False,
+                )
+                .cpu()
+                .detach()
+                .numpy()
+            )
+
+            # computing mean and covariance matrix
+            mean_array = np.mean(sample_generated, axis=0)
+            covariance_matrix = np.cov(sample_generated, rowvar=False)
+
+            if mean_array.shape[0] > 1:
+                waldo_value = (
+                    (mean_array - theta_calib).transpose()
+                    @ np.linalg.inv(covariance_matrix)
+                    @ (mean_array - theta_calib)
+                )
+            else:
+                waldo_value = (mean_array - thetas_calib) ** 2 / (covariance_matrix)
+            return waldo_value
+
         # simulating samples for each X
         if not one_X:
             par_n = thetas_calib.shape[0]
             waldo_array = np.zeros(par_n)
-            for i in range(par_n):
-                sample_generated = (
-                    self.posterior.sample(
-                        (B,),
-                        x=X_calib[i, :].reshape(1, -1),
-                        show_progress_bars=False,
-                    )
-                    .cpu()
-                    .detach()
-                    .numpy()
-                )
 
-                # computing mean and covariance matrix
-                mean_array = np.mean(sample_generated, axis=0)
-                covariance_matrix = np.cov(sample_generated, rowvar=False)
+            if trace:
+                for i in tqdm(range(par_n), desc="Computing WALDO scores"):
+                    if thetas_calib.shape[1] == 1:
+                        theta_fixed = thetas_calib[i].cpu().numpy()
+                    else:
+                        theta_fixed = thetas_calib[i, :].cpu().numpy()
 
-                if mean_array.shape[0] > 1:
-                    theta_fixed = thetas_calib[i, :].cpu().numpy()
-                    waldo_array[i] = (
-                        (mean_array - theta_fixed).transpose()
-                        @ np.linalg.inv(covariance_matrix)
-                        @ (mean_array - theta_fixed)
+                    waldo_array[i] = compute_waldo(
+                        B,
+                        X_calib[i, :].reshape(1, -1),
+                        theta_fixed,
                     )
-                else:
-                    theta_fixed = thetas_calib[i].cpu().numpy()
-                    waldo_array[i] = (mean_array - theta_fixed) ** 2 / (
-                        covariance_matrix
+            else:
+                for i in range(par_n):
+                    if thetas_calib.shape[1] == 1:
+                        theta_fixed = thetas_calib[i].cpu().numpy()
+                    else:
+                        theta_fixed = thetas_calib[i, :].cpu().numpy()
+
+                    waldo_array[i] = compute_waldo(
+                        B,
+                        X_calib[i, :].reshape(1, -1),
+                        theta_fixed,
                     )
 
         else:

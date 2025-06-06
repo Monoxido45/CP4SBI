@@ -28,12 +28,12 @@ import os
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
-    "--task", 
-    "-d", 
-    help="string for SBI task", 
+    "--task",
+    "-d",
+    help="string for SBI task",
     default="two_moons",
     type=str,
-    )
+)
 
 parser.add_argument(
     "--seed",
@@ -83,6 +83,14 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "--n_x",
+    "-nx",
+    help="number of X samples to be used",
+    default=500,
+    type=int,
+)
+
+parser.add_argument(
     "--prop_calib",
     "-p_calib",
     help="float between 0 and 1 for proportion of calibration data",
@@ -104,23 +112,24 @@ p_calib = args.prop_calib
 n_rep = args.n_rep
 device = args.device
 score_type = args.score
-X_str = (args.X_list == "True")
+X_str = args.X_list == "True"
+num_obs = args.n_x
 
 if X_str:
     # Load the X_list pickle file from the X_data folder
-    x_data_path = os.path.join(original_path, 
-                               "Results/X_data", 
-                               f"{task_name}_X_samples.pkl")
+    x_data_path = os.path.join(
+        original_path, "Results/X_data", f"{task_name}_X_samples.pkl"
+    )
     with open(x_data_path, "rb") as f:
         X_list = pickle.load(f)
-    
+
     # Load the X_list pickle file from the X_data folder
-    theta_data_path = os.path.join(original_path, 
-                               "Results/X_data", 
-                               f"{task_name}_theta_samples.pkl")
+    theta_data_path = os.path.join(
+        original_path, "Results/X_data", f"{task_name}_theta_samples.pkl"
+    )
     with open(theta_data_path, "rb") as f:
         theta_list = pickle.load(f)
-    
+
     X_dict = {"X": X_list, "theta": theta_list}
 else:
     X_dict = None
@@ -171,14 +180,16 @@ elif task.name == "gaussian_mixture":
     )
 elif task.name == "sir":
     prior_list = [
-        LogNormal(loc = torch.tensor([math.log(0.4)], device = device),
-                  scale = torch.tensor([0.5], device = device),
-                  validate_args = False,
-                  ),
-        LogNormal(loc = torch.tensor([math.log(0.125)], device = device),
-                  scale = torch.tensor([0.2], device = device),
-                  validate_args = False,
-                  ),   
+        LogNormal(
+            loc=torch.tensor([math.log(0.4)], device=device),
+            scale=torch.tensor([0.5], device=device),
+            validate_args=False,
+        ),
+        LogNormal(
+            loc=torch.tensor([math.log(0.125)], device=device),
+            scale=torch.tensor([0.2], device=device),
+            validate_args=False,
+        ),
     ]
     prior_dist = MultipleIndependent(prior_list, validate_args=False)
     prior_NPE, _, _ = process_prior(prior_dist)
@@ -211,8 +222,8 @@ elif task.name == "lotka_volterra":
 def compute_coverage(
     prior_NPE,
     score_type,
-    X = None,
-    theta = None,
+    X=None,
+    theta=None,
     B=5000,
     prop_calib=0.2,
     alpha=0.1,
@@ -222,18 +233,13 @@ def compute_coverage(
     random_seed=0,
     min_samples_leaf=300,
     naive_samples=1000,
-    sequential = False,
-    num_rounds = 0,
-    x_o = None,
-    observation = None,
+    sequential=False,
+    num_rounds=10,
 ):
     # fixing task
     task = sbibm.get_task(task_name)
     prior = task.get_prior()
     simulator = task.get_simulator()
-
-    if(observation == None):
-        observation = task.get_observation(num_observation=1)
 
     # setting seet
     torch.manual_seed(random_seed)
@@ -270,10 +276,9 @@ def compute_coverage(
         theta_train = theta[train_indices]
         thetas_calib = theta[calib_indices]
 
-         # fitting NPE
+        # fitting NPE
         inference = NPE(prior_NPE, device=device)
-        inference.append_simulations(theta_train, 
-                                     X_train).train()
+        inference.append_simulations(theta_train, X_train).train()
 
     cuda = device == "cuda"
 
@@ -284,7 +289,6 @@ def compute_coverage(
         score_used = WALDOScore
 
     # CDF split
-    print("Fitting CDF split")
     cdf_conf = BayCon(
         sbi_score=score_used,
         base_inference=inference,
@@ -298,37 +302,8 @@ def compute_coverage(
         X=X_train,
         theta=theta_train,
     )
-    if (sequential):
-
-        if x_o is None:
-            x_o = observation.to(device="cuda")
-
-        # Fitting SNPE
-        posteriors = []
-        proposal = prior_NPE
-        def cpu_simulator(parameters):
-            with torch.no_grad():
-                return simulator(parameters.cpu())    
-        for j in range(num_rounds):
-
-            theta, x = simulate_for_sbi(cpu_simulator, proposal, num_simulations = 500)
-            theta, x = theta.to("cuda"), x.to("cuda")
-            density_estimator = inference.append_simulations(
-                theta, x, proposal=proposal
-            ).train(force_first_round_loss=True)
-            posterior = inference.build_posterior(density_estimator)
-            posteriors.append(posterior)
-            proposal = posterior.set_default_x(x_o)
-            
-        cdf_conf.cdf_split.sbi_score.posterior = posterior
-
-    cdf_conf.calib(
-        X_calib=X_calib,
-        theta_calib=thetas_calib,
-    )
 
     # fitting LOCART
-    print("Fitting LOCART")
     bayes_conf = BayCon(
         sbi_score=score_used,
         base_inference=inference,
@@ -342,38 +317,7 @@ def compute_coverage(
         theta=theta_train,
     )
 
-    if (sequential):
-
-        if x_o is None:
-            x_o = observation.to(device="cuda")
-
-        # Fitting SNPE
-        posteriors = []
-        proposal = prior_NPE
-        def cpu_simulator(parameters):
-            with torch.no_grad():
-                return simulator(parameters.cpu())    
-        for j in range(num_rounds):
-
-            theta, x = simulate_for_sbi(cpu_simulator, proposal, num_simulations = 500)
-            theta, x = theta.to("cuda"), x.to("cuda")
-            density_estimator = inference.append_simulations(
-                theta, x, proposal=proposal
-            ).train(force_first_round_loss=True)
-            posterior = inference.build_posterior(density_estimator)
-            posteriors.append(posterior)
-            proposal = posterior.set_default_x(x_o)
-            
-        bayes_conf.locart.sbi_score.posterior = posterior
-
-    bayes_conf.calib(
-        X_calib=X_calib,
-        theta_calib=thetas_calib,
-        locart_kwargs={"min_samples_leaf": min_samples_leaf},
-    )
-
     # global
-    print("Fitting global conformal")
     global_conf = BayCon(
         sbi_score=score_used,
         base_inference=inference,
@@ -388,11 +332,6 @@ def compute_coverage(
         theta=theta_train,
     )
 
-    global_conf.calib(
-        X_calib=X_calib,
-        theta_calib=thetas_calib,
-    )
-
     coverage_locart = np.zeros(num_obs)
     coverage_global = np.zeros(num_obs)
     coverage_cdf = np.zeros(num_obs)
@@ -405,71 +344,124 @@ def compute_coverage(
     with open(posterior_data_path, "rb") as f:
         X_dict = pickle.load(f)
 
+    if num_obs < len(X_dict.keys()):
+        X_dict = {k: X_dict[k] for k in list(X_dict.keys())[:num_obs]}
+
     X_obs = torch.cat(list(X_dict.keys())).numpy()
-    locart_cutoff = bayes_conf.predict_cutoff(X_obs)
-    global_cutoff = global_conf.predict_cutoff(X_obs)
-    cdf_cutoff = cdf_conf.predict_cutoff(X_obs)
 
     i = 0
     dict_keys = list(X_dict.keys())
     # evaluating cutoff for each observation
-    for X in tqdm(dict_keys, desc="Computing coverage across observations"):
-        post_samples = X_dict[X]
+    for X_0 in tqdm(dict_keys, desc="Computing coverage across observations"):
+        post_samples = X_dict[X_0]
 
-        # computing naive cutoff   
+        # cloning inference object
+        base_inference = deepcopy(inference)
+
+        if sequential:
+            print("Fitting SNPE in sequential mode")
+            x_o = X_0
+
+            # Fitting SNPE
+            posteriors = []
+            proposal = prior_NPE
+
+            def cpu_simulator(parameters):
+                with torch.no_grad():
+                    return simulator(parameters.cpu())
+
+            for j in range(num_rounds):
+
+                theta, x = simulate_for_sbi(
+                    cpu_simulator, proposal, num_simulations=500
+                )
+                theta, x = theta.to("cuda"), x.to("cuda")
+                density_estimator = base_inference.append_simulations(
+                    theta, x, proposal=proposal
+                ).train(force_first_round_loss=True)
+                posterior = base_inference.build_posterior(density_estimator)
+                posteriors.append(posterior)
+                proposal = posterior.set_default_x(x_o)
+
+            cdf_conf.cdf_split.sbi_score.posterior = posterior
+            bayes_conf.locart.sbi_score.posterior = posterior
+            global_conf.sbi_score.posterior = posterior
+
+        # fitting LOCART, CDF split and global after changing base model to SNPE
+        print("Fitting LOCART")
+        bayes_conf.calib(
+            X_calib=X_calib,
+            theta_calib=thetas_calib,
+            min_samples_leaf=min_samples_leaf,
+        )
+        print("Fitting CDF-split")
+        cdf_conf.calib(
+            X_calib=X_calib,
+            theta_calib=thetas_calib,
+        )
+        print("Fitting global conformal")
+        global_conf.calib(
+            X_calib=X_calib,
+            theta_calib=thetas_calib,
+        )
+
+        locart_cutoff = bayes_conf.predict_cutoff(X_0)
+        global_cutoff = global_conf.predict_cutoff(X_0)
+        cdf_cutoff = cdf_conf.predict_cutoff(X_0)
+
+        # computing naive cutoff
         post_estim = deepcopy(bayes_conf.locart.sbi_score.posterior)
-
 
         if score_type == "HPD":
             # computing naive cutoff
             if task_name == "sir":
                 closest_t = naive_method(
-                post_estim,
-                X=X,
-                alpha = alpha,
-                score_type=score_type,
-                device=device,
-                n_grid = 1000,
-                B_naive = naive_samples,
+                    post_estim,
+                    X=X_0,
+                    alpha=alpha,
+                    score_type=score_type,
+                    device=device,
+                    n_grid=1000,
+                    B_naive=naive_samples,
                 )
             else:
                 closest_t = naive_method(
-                post_estim,
-                X=X,
-                alpha = alpha,
-                score_type=score_type,
-                device=device,
-                B_naive = naive_samples,
+                    post_estim,
+                    X=X_0,
+                    alpha=alpha,
+                    score_type=score_type,
+                    device=device,
+                    B_naive=naive_samples,
                 )
 
             # computing scores
             conf_scores = -np.exp(
-            post_estim.log_prob_batched(
-                post_samples.to(device=device),
-                x=X.reshape(1, -1).to(device=device),
-            )
-            .cpu()
-            .numpy()
+                post_estim.log_prob_batched(
+                    post_samples.to(device=device),
+                    x=X_0.to(device=device),
+                )
+                .cpu()
+                .numpy()
             )
         elif score_type == "WALDO":
             # computing naive cutoff
             if task_name == "sir":
                 closest_t, mean_array, inv_matrix = naive_method(
-                X=X,
-                alpha = alpha,
-                score_type=score_type,
-                device=device,
-                B_naive = naive_samples,
-                n_grid = 700,
+                    X=X,
+                    alpha=alpha,
+                    score_type=score_type,
+                    device=device,
+                    B_naive=naive_samples,
+                    n_grid=700,
                 )
             else:
                 closest_t, mean_array, inv_matrix = naive_method(
-                post_estim,
-                X=X,
-                alpha = alpha,
-                score_type=score_type,
-                device=device,
-                B_naive = naive_samples,
+                    post_estim,
+                    X=X,
+                    alpha=alpha,
+                    score_type=score_type,
+                    device=device,
+                    B_naive=naive_samples,
                 )
 
             # computing scores
@@ -478,21 +470,19 @@ def compute_coverage(
                 if mean_array.shape[0] > 1:
                     sel_sample = post_samples[j, :].cpu().numpy()
                     conf_scores[j] = (
-                    (mean_array - sel_sample).transpose()
-                    @ inv_matrix
-                    @ (mean_array - sel_sample)
+                        (mean_array - sel_sample).transpose()
+                        @ inv_matrix
+                        @ (mean_array - sel_sample)
                     )
                 else:
                     sel_sample = post_samples[j].cpu().numpy()
-                    conf_scores[j] = (
-                    (mean_array - sel_sample) ** 2 / (inv_matrix)
-                    )
+                    conf_scores[j] = (mean_array - sel_sample) ** 2 / (inv_matrix)
 
         # computing coverage
-        coverage_locart[i] = np.mean(conf_scores <= locart_cutoff[i])
-        coverage_global[i] = np.mean(conf_scores <= global_cutoff[i])
+        coverage_locart[i] = np.mean(conf_scores <= locart_cutoff)
+        coverage_global[i] = np.mean(conf_scores <= global_cutoff)
         coverage_naive[i] = np.mean(conf_scores <= closest_t)
-        coverage_cdf[i] = np.mean(conf_scores <= cdf_cutoff[i])
+        coverage_cdf[i] = np.mean(conf_scores <= cdf_cutoff)
 
         i += 1
 
@@ -511,7 +501,7 @@ def compute_coverage(
 def compute_coverage_repeated(
     prior_NPE,
     score_type,
-    X_list = None,
+    X_list=None,
     B=5000,
     prop_calib=0.2,
     alpha=0.1,
@@ -522,11 +512,11 @@ def compute_coverage_repeated(
     min_samples_leaf=150,
     naive_samples=1000,
     n_rep=30,
-    sequential = True,
-    num_rounds = 5,
+    sequential=True,
+    num_rounds=5,
 ):
     # Generate an array of seeds using the central_seed
-    #seeds = np.random.RandomState(central_seed).randint(0, 2**32 - 1, size=n_rep)
+    # seeds = np.random.RandomState(central_seed).randint(0, 2**32 - 1, size=n_rep)
     seeds = np.random.RandomState(central_seed).randint(0, 2**31 - 1, size=n_rep)
 
     # Initialize an empty list to store coverage results
@@ -535,7 +525,9 @@ def compute_coverage_repeated(
     # Initialize a list to store checkpoints
     checkpoint_path = os.path.join(original_path, "Results", "MAE_results")
     os.makedirs(checkpoint_path, exist_ok=True)
-    checkpoint_file = os.path.join(checkpoint_path, f"{score_type}_{task_name}_checkpoints.pkl")
+    checkpoint_file = os.path.join(
+        checkpoint_path, f"{score_type}_{task_name}_checkpoints.pkl"
+    )
 
     # Check if the checkpoint file exists
     if os.path.exists(checkpoint_file):
@@ -545,7 +537,10 @@ def compute_coverage_repeated(
     # Start the loop from the length of the checkpoint list
     start_index = len(coverage_results)
     # Adjust the loop to start from the start_index
-    for i, seed in enumerate(tqdm(seeds[start_index:], desc="Computing coverage for each seed"), start=start_index):
+    for i, seed in enumerate(
+        tqdm(seeds[start_index:], desc="Computing coverage for each seed"),
+        start=start_index,
+    ):
         # checking X_list
         if X_list is not None:
             X = X_list["X"][i]
@@ -557,8 +552,8 @@ def compute_coverage_repeated(
         coverage_df = compute_coverage(
             score_type=score_type,
             prior_NPE=prior_NPE,
-            X = X,
-            theta = theta,
+            X=X,
+            theta=theta,
             B=B,
             prop_calib=prop_calib,
             alpha=alpha,
@@ -568,14 +563,14 @@ def compute_coverage_repeated(
             random_seed=seed,
             min_samples_leaf=min_samples_leaf,
             naive_samples=naive_samples,
-            sequential = True,
-            num_rounds = num_rounds,
+            sequential=True,
+            num_rounds=num_rounds,
         )
         coverage_results.append(coverage_df)
 
         with open(checkpoint_file, "wb") as f:
             pickle.dump(coverage_results, f)
-    
+
     # Combine results into a single DataFrame
     combined_coverage_df = pd.concat(coverage_results, ignore_index=True)
     return combined_coverage_df
@@ -584,19 +579,19 @@ def compute_coverage_repeated(
 all_coverage_df = compute_coverage_repeated(
     score_type=score_type,
     prior_NPE=prior_NPE,
-    X_list = X_dict,
+    X_list=X_dict,
     B=B,
     prop_calib=p_calib,
     alpha=alpha,
-    num_obs=500,
+    num_obs=num_obs,
     task_name=task_name,
     device=device,
     central_seed=seed,
     min_samples_leaf=300,
     naive_samples=1000,
     n_rep=n_rep,
-    sequential = True,
-    num_rounds = 5,
+    sequential=True,
+    num_rounds=5,
 )
 
 # Create the "MAE_results" folder if it doesn't exist
@@ -604,7 +599,9 @@ mae_results_path = os.path.join(original_path, "Results", "MAE_results")
 os.makedirs(mae_results_path, exist_ok=True)
 
 # Save the all_coverage_df DataFrame to a CSV file
-csv_path = os.path.join(mae_results_path, f"{score_type}_{task_name}_coverage_results.csv")
+csv_path = os.path.join(
+    mae_results_path, f"{score_type}_{task_name}_coverage_results.csv"
+)
 all_coverage_df.to_csv(csv_path, index=False)
 
 # Compute the summary statistics (mean and standard error) for each column
@@ -613,10 +610,14 @@ summary_stats.loc["stderr"] = summary_stats.loc["std"] / np.sqrt(n_rep)
 summary_stats = summary_stats.drop(index="std")  # Drop standard deviation row
 
 # Save the summary statistics to a CSV file
-summary_csv_path = os.path.join(mae_results_path, f"{score_type}_{task_name}_coverage_summary.csv")
+summary_csv_path = os.path.join(
+    mae_results_path, f"{score_type}_{task_name}_coverage_summary.csv"
+)
 summary_stats.to_csv(summary_csv_path)
 
 # Removing all checkpoints
-checkpoint_file = os.path.join(mae_results_path, f"{score_type}_{task_name}_checkpoints.pkl")
+checkpoint_file = os.path.join(
+    mae_results_path, f"{score_type}_{task_name}_checkpoints.pkl"
+)
 if os.path.exists(checkpoint_file):
     os.remove(checkpoint_file)

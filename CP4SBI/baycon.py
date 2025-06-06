@@ -86,6 +86,7 @@ class LocartInf(BaseEstimator):
         cart_train_size=0.5,
         n_samples=1000,
         min_samples_leaf=100,
+        using_res=False,
         **kwargs
     ):
         """
@@ -105,7 +106,10 @@ class LocartInf(BaseEstimator):
 
         Ouput: Vector of cutoffs.
         """
-        res = self.sbi_score.compute(X_calib, theta_calib)
+        if not using_res:
+            res = self.sbi_score.compute(X_calib, theta_calib)
+        else:
+            res = theta_calib
 
         # computing variance of the conformal score
         if self.weighting:
@@ -361,6 +365,7 @@ class CDFSplit(BaseEstimator):
         random_seed=1250,
         prune_tree=True,
         min_samples_leaf=100,
+        using_res=False,
     ):
         """
         Calibrate conformity score using the cumulative distribution function of the score derived by the sbi base model.
@@ -368,17 +373,21 @@ class CDFSplit(BaseEstimator):
         --------------------------------------------------------
 
         Input: (i)    X_calib: Calibration numpy feature matrix
-               (ii)   theta_calib: Calibration parameter array
+               (ii)   theta_calib: Calibration parameter array or bayesian scores already computed. Depending on whether using_res = False or True
                (iii)  random_seed: Random seed for Monte Carlo.
                (iv)   n_samples: Number of samples to be used for Monte Carlo approximation.
                (v)  split_calib: Boolean indicating whether to split the calibration set into partitioning and cutoff set when using local cutoffs.
                (vi)  cart_train_size: Proportion of calibration data used in partitioning when using local cutoffs.
                (vii) random_seed: Random seed for data splitting in the prune step when using local cutoffs.
                (viii) prune_tree: Boolean indicating whether to prune the decision tree or not when using local cutoffs.
-
+               (ix) min_samples_leaf:
+               (x) using_res:
         Ouput: Vector of cutoffs.
         """
-        res = self.sbi_score.compute(X_calib, theta_calib)
+        if not using_res:
+            res = self.sbi_score.compute(X_calib, theta_calib)
+        else:
+            res = theta_calib
 
         # Transform X_calib and theta_calib into tensors if they are numpy arrays
         if isinstance(X_calib, np.ndarray):
@@ -693,6 +702,7 @@ class BayCon:
         cart_train_size=0.5,
         random_seed=1250,
         locart_kwargs=None,
+        using_res=False,
     ):
         """
         Calibrate the credible region using the calibration set.
@@ -716,9 +726,12 @@ class BayCon:
 
         # computing cutoffs using standard approach
         if self.conformal_method == "global":
-            res = self.sbi_score.compute(X_calib, theta_calib)
-            n = res.shape[0]
+            if using_res:
+                res = theta_calib
+            else:
+                res = self.sbi_score.compute(X_calib, theta_calib)
 
+            n = res.shape[0]
             # computing cutoff
             self.cutoff = np.quantile(res, q=np.ceil((n + 1) * (1 - self.alpha)) / n)
 
@@ -733,6 +746,7 @@ class BayCon:
                     min_samples_leaf=min_samples_leaf,
                     cart_train_size=cart_train_size,
                     random_seed=random_seed,
+                    using_res=using_res,
                     **locart_kwargs,
                 )
             else:
@@ -743,10 +757,15 @@ class BayCon:
                     min_samples_leaf=min_samples_leaf,
                     cart_train_size=cart_train_size,
                     random_seed=random_seed,
+                    using_res=using_res,
                 )
 
         elif self.conformal_method == "CDF":
-            self.cutoff = self.cdf_split.calib(X_calib, theta_calib)
+            self.cutoff = self.cdf_split.calib(
+                X_calib,
+                theta_calib,
+                using_res=using_res,
+            )
 
         elif self.conformal_method == "CDF local":
             self.cutoff = self.cdf_split.calib(
@@ -756,6 +775,7 @@ class BayCon:
                 min_samples_leaf=min_samples_leaf,
                 cart_train_size=cart_train_size,
                 random_seed=random_seed,
+                using_res=using_res,
             )
 
         return self.cutoff
