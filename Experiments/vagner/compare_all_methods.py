@@ -392,7 +392,7 @@ def compute_coverage(
         bayes_conf.calib(
             X_calib=X_calib,
             theta_calib=thetas_calib,
-            min_samples_leaf=min_samples_leaf,
+        #    min_samples_leaf=min_samples_leaf,
         )
         print("Fitting CDF-split")
         cdf_conf.calib(
