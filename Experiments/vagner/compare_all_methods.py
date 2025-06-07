@@ -138,29 +138,37 @@ else:
 alpha = 0.1
 
 # Load the SBI task, simulator, and prior
-task = sbibm.get_task(task_name)
-simulator = task.get_simulator()
-prior = task.get_prior()
+if task_name != "gaussian_mixture":
+    task = sbibm.get_task(task_name)
+    simulator = task.get_simulator()
+    prior = task.get_prior()
+else:
+    from CP4SBI.gmm_task import GaussianMixture
 
-if task.name == "two_moons":
+    task = GaussianMixture(dim=2, prior_bound=4.0)
+    simulator = task.get_simulator()
+    prior = task.get_prior()
+
+
+if task_name == "two_moons":
     prior_NPE = BoxUniform(
         low=-1 * torch.ones(2),
         high=1 * torch.ones(2),
         device=device,
     )
-elif task.name == "gaussian_linear_uniform":
+elif task_name == "gaussian_linear_uniform":
     prior_NPE = BoxUniform(
         low=-1 * torch.ones(10),
         high=1 * torch.ones(10),
         device=device,
     )
-elif task.name == "slcp":
+elif task_name == "slcp":
     prior_NPE = BoxUniform(
         low=-3 * torch.ones(5),
         high=3 * torch.ones(5),
         device=device,
     )
-elif task.name == "gaussian_linear":
+elif task_name == "gaussian_linear":
     prior_params = {
         "loc": torch.zeros((task.dim_parameters,), device=device),
         "precision_matrix": torch.inverse(
@@ -172,13 +180,39 @@ elif task.name == "gaussian_linear":
         validate_args=False,
     )
     prior_NPE, _, _ = process_prior(prior_dist)
-elif task.name == "gaussian_mixture":
+elif task_name == "bernoulli_glm" or "bernoulli_glm_raw":
+    dim_parameters = 10
+    # parameters for the prior distribution
+    M = dim_parameters - 1
+    D = torch.diag(torch.ones(M, device=device)) - torch.diag(
+        torch.ones(M - 1, device=device), -1
+    )
+    F = (
+        torch.matmul(D, D)
+        + torch.diag(1.0 * torch.arange(M, device=device) / (M)) ** 0.5
+    )
+    Binv = torch.zeros(size=(M + 1, M + 1), device=device)
+    Binv[0, 0] = 0.5  # offset
+    Binv[1:, 1:] = torch.matmul(F.T, F)  # filter
+
+    prior_params = {
+        "loc": torch.zeros((M + 1,), device=device),
+        "precision_matrix": Binv,
+    }
+
+    prior_dist = MultivariateNormal(
+        **prior_params,
+        validate_args=False,
+    )
+    prior_NPE, _, _ = process_prior(prior_dist)
+elif task_name == "gaussian_mixture":
     prior_NPE = BoxUniform(
-        low=-10 * torch.ones(task.dim_parameters),
-        high=10 * torch.ones(task.dim_parameters),
+        low=-4 * torch.ones(2),
+        high=4 * torch.ones(2),
         device=device,
     )
-elif task.name == "sir":
+
+elif task_name == "sir":
     prior_list = [
         LogNormal(
             loc=torch.tensor([math.log(0.4)], device=device),
@@ -193,7 +227,7 @@ elif task.name == "sir":
     ]
     prior_dist = MultipleIndependent(prior_list, validate_args=False)
     prior_NPE, _, _ = process_prior(prior_dist)
-elif task.name == "lotka_volterra":
+elif task_name == "lotka_volterra":
     mu_p1 = -0.125
     mu_p2 = -3.0
     sigma_p = 0.5
@@ -201,8 +235,32 @@ elif task.name == "lotka_volterra":
         "loc": torch.tensor([mu_p1, mu_p2, mu_p1, mu_p2], device=device),
         "scale": torch.tensor([sigma_p, sigma_p, sigma_p, sigma_p], device=device),
     }
-    prior_dist = LogNormal(**prior_params, validate_args=False)
+
+    prior_list = [
+        LogNormal(
+            loc=torch.tensor([mu_p1], device=device),
+            scale=torch.tensor([sigma_p], device=device),
+            validate_args=False,
+        ),
+        LogNormal(
+            loc=torch.tensor([mu_p2], device=device),
+            scale=torch.tensor([sigma_p], device=device),
+            validate_args=False,
+        ),
+        LogNormal(
+            loc=torch.tensor([mu_p1], device=device),
+            scale=torch.tensor([sigma_p], device=device),
+            validate_args=False,
+        ),
+        LogNormal(
+            loc=torch.tensor([mu_p2], device=device),
+            scale=torch.tensor([sigma_p], device=device),
+            validate_args=False,
+        ),
+    ]
+    prior_dist = MultipleIndependent(prior_list, validate_args=False)
     prior_NPE, _, _ = process_prior(prior_dist)
+
 
 # unused simulators
 # elif task.name == "bernoulli_glm":
@@ -235,6 +293,7 @@ def compute_coverage(
     naive_samples=1000,
     sequential=False,
     num_rounds=10,
+    split_calib=False,
 ):
     # fixing task
     task = sbibm.get_task(task_name)
@@ -303,6 +362,22 @@ def compute_coverage(
         theta=theta_train,
     )
 
+    # CDF split + LOCART
+    local_cdf_conf = BayCon(
+        sbi_score=score_used,
+        base_inference=inference,
+        is_fitted=True,
+        conformal_method="CDF local",
+        split_calib=split_calib,
+        cuda=cuda,
+        alpha=alpha,
+    )
+
+    local_cdf_conf.fit(
+        X=X_train,
+        theta=theta_train,
+    )
+
     # fitting LOCART
     bayes_conf = BayCon(
         sbi_score=score_used,
@@ -313,6 +388,22 @@ def compute_coverage(
         alpha=alpha,
     )
     bayes_conf.fit(
+        X=X_train,
+        theta=theta_train,
+    )
+
+    # fitting LOCART
+    w_bayes_conf = BayCon(
+        sbi_score=score_used,
+        base_inference=inference,
+        is_fitted=True,
+        conformal_method="local",
+        weighting=True,
+        split_calib=split_calib,
+        cuda=cuda,
+        alpha=alpha,
+    )
+    w_bayes_conf.fit(
         X=X_train,
         theta=theta_train,
     )
@@ -336,6 +427,8 @@ def compute_coverage(
     coverage_global = np.zeros(num_obs)
     coverage_cdf = np.zeros(num_obs)
     coverage_naive = np.zeros(num_obs)
+    coverage_local_cdf = np.zeros(num_obs)
+    coverage_a_locart = np.zeros(num_obs)
 
     # Load the dictionary from the pickle file
     posterior_data_path = (
@@ -373,7 +466,7 @@ def compute_coverage(
             for j in range(num_rounds):
 
                 theta, x = simulate_for_sbi(
-                    cpu_simulator, proposal, num_simulations=500
+                    cpu_simulator, proposal, num_simulations=1000
                 )
                 theta, x = theta.to("cuda"), x.to("cuda")
                 density_estimator = base_inference.append_simulations(
@@ -385,29 +478,56 @@ def compute_coverage(
 
             cdf_conf.cdf_split.sbi_score.posterior = posterior
             bayes_conf.locart.sbi_score.posterior = posterior
+            w_bayes_conf.locart.sbi_score.posterior = posterior
             global_conf.sbi_score.posterior = posterior
+            local_cdf_conf.sbi_score.posterior = posterior
+
+        # computing scores only one time
+        res = cdf_conf.cdf_split.sbi_score.compute(
+            X_calib,
+            thetas_calib,
+        )
 
         # fitting LOCART, CDF split and global after changing base model to SNPE
         print("Fitting LOCART")
         bayes_conf.calib(
             X_calib=X_calib,
-            theta_calib=thetas_calib,
-        #    min_samples_leaf=min_samples_leaf,
+            theta_calib=res,
+            min_samples_leaf=min_samples_leaf,
+            using_res=True,
+        )
+        print("Fitting A-LOCART")
+        w_bayes_conf.calib(
+            X_calib=X_calib,
+            theta_calib=res,
+            min_samples_leaf=min_samples_leaf,
+            using_res=True,
         )
         print("Fitting CDF-split")
         cdf_conf.calib(
             X_calib=X_calib,
-            theta_calib=thetas_calib,
+            theta_calib=res,
+            using_res=True,
+        )
+        print("Fitting CDF-split local")
+        local_cdf_conf.calib(
+            X_calib=X_calib,
+            theta_calib=res,
+            min_samples_leaf=min_samples_leaf,
+            using_res=True,
         )
         print("Fitting global conformal")
         global_conf.calib(
             X_calib=X_calib,
-            theta_calib=thetas_calib,
+            theta_calib=res,
+            using_res=True,
         )
 
         locart_cutoff = bayes_conf.predict_cutoff(X_0)
         global_cutoff = global_conf.predict_cutoff(X_0)
         cdf_cutoff = cdf_conf.predict_cutoff(X_0)
+        local_cdf_cutoff = local_cdf_conf.predict_cutoff(X_0)
+        alocart_cutoff = w_bayes_conf.predict_cutoff(X_0)
 
         # computing naive cutoff
         post_estim = deepcopy(bayes_conf.locart.sbi_score.posterior)
@@ -483,6 +603,8 @@ def compute_coverage(
         coverage_global[i] = np.mean(conf_scores <= global_cutoff)
         coverage_naive[i] = np.mean(conf_scores <= closest_t)
         coverage_cdf[i] = np.mean(conf_scores <= cdf_cutoff)
+        coverage_local_cdf[i] = np.mean(conf_scores <= local_cdf_cutoff)
+        coverage_a_locart[i] = np.mean(conf_scores <= alocart_cutoff)
 
         i += 1
 
@@ -490,9 +612,11 @@ def compute_coverage(
     coverage_df = pd.DataFrame(
         {
             "LOCART MAD": [np.mean(np.abs(coverage_locart - (1 - alpha)))],
+            "A-LOCART MAD": [np.mean(np.abs(coverage_a_locart - (1 - alpha)))],
             "Global CP MAD": [np.mean(np.abs(coverage_global - (1 - alpha)))],
             "Naive MAD": [np.mean(np.abs(coverage_naive - (1 - alpha)))],
             "CDF MAD": [np.mean(np.abs(coverage_cdf - (1 - alpha)))],
+            "Local CDF MAD": [np.mean(np.abs(coverage_local_cdf - (1 - alpha)))],
         }
     )
     return coverage_df
@@ -523,7 +647,9 @@ def compute_coverage_repeated(
     coverage_results = []
 
     # Initialize a list to store checkpoints
-    checkpoint_path = os.path.join(original_path, "Results", "MAE_results")
+    checkpoint_path = os.path.join(
+        original_path, "Experiments/vagner/Results", "MAE_results"
+    )
     os.makedirs(checkpoint_path, exist_ok=True)
     checkpoint_file = os.path.join(
         checkpoint_path, f"{score_type}_{task_name}_checkpoints.pkl"

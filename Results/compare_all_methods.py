@@ -1,7 +1,7 @@
 # for posterior estimation and calibration
 import torch
 from sbi.utils import BoxUniform
-from sbi.inference import NPE
+from sbi.inference import NPE, NPSE
 from CP4SBI.baycon import BayCon
 from CP4SBI.scores import HPDScore, WALDOScore
 from sbi.utils.user_input_checks import process_prior
@@ -106,6 +106,14 @@ parser.add_argument(
     type=int,
 )
 
+parser.add_argument(
+    "--base_model",
+    "-b_m",
+    help="string for base model to be used",
+    default="NPE",
+    type=str,
+)
+
 original_path = os.getcwd()
 if __name__ == "__main__":
     args = parser.parse_args()  # get arguments from command line
@@ -122,6 +130,7 @@ score_type = args.score
 X_str = args.X_list == "True"
 num_obs = args.n_x
 sample_with = args.sample_with
+base_model = args.base_model
 
 if X_str:
     # Load the X_list pickle file from the X_data folder
@@ -307,10 +316,6 @@ def compute_coverage(
         theta_train = prior(num_samples=B_train)
         X_train = simulator(theta_train)
 
-        # fitting NPE
-        inference = NPE(prior_NPE, device=device)
-        inference.append_simulations(theta_train, X_train).train()
-
         # training conformal methods
         thetas_calib = prior(num_samples=B_calib)
         X_calib = simulator(thetas_calib)
@@ -328,9 +333,21 @@ def compute_coverage(
         theta_train = theta[train_indices]
         thetas_calib = theta[calib_indices]
 
+    if base_model == "NPE":
         # fitting NPE
         inference = NPE(prior_NPE, device=device)
-        inference.append_simulations(theta_train, X_train).train()
+        inference.append_simulations(
+            theta_train,
+            X_train,
+        ).train()
+
+    elif base_model == "NPSE":
+        # fitting diffusion model
+        inference = NPSE(prior_NPE, device=device)
+        inference.append_simulations(
+            theta=theta_train.to(device),
+            x=X_train.to(device),
+        ).train()
 
     cuda = device == "cuda"
 
@@ -340,8 +357,7 @@ def compute_coverage(
     elif score_type == "WALDO":
         score_used = WALDOScore
 
-    # CDF split
-    print("Fitting CDF split")
+    print("Computing conformal scores")
     cdf_conf = BayCon(
         sbi_score=score_used,
         base_inference=inference,
@@ -357,9 +373,15 @@ def compute_coverage(
         sample_with=sample_with,
     )
 
+    res = cdf_conf.cdf_split.sbi_score.compute(X_calib, thetas_calib)
+
+    # CDF split
+    print("Fitting CDF split")
+
     cdf_conf.calib(
         X_calib=X_calib,
-        theta_calib=thetas_calib,
+        theta_calib=res,
+        using_res=True,
     )
 
     print("Fitting local CDF split")
@@ -382,8 +404,9 @@ def compute_coverage(
 
     local_cdf_conf.calib(
         X_calib=X_calib,
-        theta_calib=thetas_calib,
+        theta_calib=res,
         min_samples_leaf=min_samples_leaf,
+        using_res=True,
     )
 
     # fitting LOCART
@@ -403,8 +426,9 @@ def compute_coverage(
     )
     bayes_conf.calib(
         X_calib=X_calib,
-        theta_calib=thetas_calib,
+        theta_calib=res,
         min_samples_leaf=min_samples_leaf,
+        using_res=True,
     )
 
     # fitting LOCART
@@ -426,8 +450,9 @@ def compute_coverage(
     )
     w_bayes_conf.calib(
         X_calib=X_calib,
-        theta_calib=thetas_calib,
+        theta_calib=res,
         min_samples_leaf=min_samples_leaf,
+        using_res=True,
     )
 
     # global
@@ -448,7 +473,8 @@ def compute_coverage(
 
     global_conf.calib(
         X_calib=X_calib,
-        theta_calib=thetas_calib,
+        theta_calib=res,
+        using_res=True,
     )
 
     coverage_locart = np.zeros(num_obs)
@@ -457,7 +483,37 @@ def compute_coverage(
     coverage_naive = np.zeros(num_obs)
     coverage_local_cdf = np.zeros(num_obs)
     coverage_a_locart = np.zeros(num_obs)
-    coverage_hdr = np.zeros(num_obs)
+
+    post_estim = deepcopy(bayes_conf.locart.sbi_score.posterior)
+    if base_model != "NPSE":
+        coverage_hdr = np.zeros(num_obs)
+
+        # HDR recalibration
+        print("Fitting HDR recalibration")
+        if score_type == "HPD":
+            hdr_cutoff, hdr_obj = hdr_method(
+                post_estim=inference,
+                X_calib=X_calib,
+                thetas_calib=thetas_calib,
+                n_grid=1000,
+                X_test=X_obs,
+                is_fitted=True,
+                alpha=alpha,
+                score_type=score_type,
+                device=device,
+            )
+        elif score_type == "WALDO":
+            hdr_cutoff, hdr_obj, mean_list, inv_matrix_list = hdr_method(
+                post_estim=inference,
+                X_calib=X_calib,
+                thetas_calib=thetas_calib,
+                n_grid=1000,
+                X_test=X_obs,
+                is_fitted=True,
+                alpha=alpha,
+                score_type=score_type,
+                device=device,
+            )
 
     # Load the dictionary from the pickle file
     posterior_data_path = (
@@ -472,35 +528,6 @@ def compute_coverage(
     cdf_cutoff = cdf_conf.predict_cutoff(X_obs)
     local_cdf_cutoff = local_cdf_conf.predict_cutoff(X_obs)
     alocart_cutoff = w_bayes_conf.predict_cutoff(X_obs)
-
-    post_estim = deepcopy(bayes_conf.locart.sbi_score.posterior)
-
-    # HDR recalibration
-    print("Fitting HDR recalibration")
-    if score_type == "HPD":
-        hdr_cutoff, hdr_obj = hdr_method(
-            post_estim=inference,
-            X_calib=X_calib,
-            thetas_calib=thetas_calib,
-            n_grid=1000,
-            X_test=X_obs,
-            is_fitted=True,
-            alpha=alpha,
-            score_type=score_type,
-            device=device,
-        )
-    elif score_type == "WALDO":
-        hdr_cutoff, hdr_obj, mean_list, inv_matrix_list = hdr_method(
-            post_estim=inference,
-            X_calib=X_calib,
-            thetas_calib=thetas_calib,
-            n_grid=1000,
-            X_test=X_obs,
-            is_fitted=True,
-            alpha=alpha,
-            score_type=score_type,
-            device=device,
-        )
 
     i = 0
     dict_keys = list(X_dict.keys())
@@ -598,42 +625,44 @@ def compute_coverage(
                     sel_sample = post_samples[j].cpu().numpy()
                     conf_scores[j] = (mean_array - sel_sample) ** 2 / (inv_matrix)
 
-            # obtaining conf_scores for the recalibration approach
-            # obtaining recalibrated samples first
-            prob_post = np.exp(
-                post_estim.log_prob(
-                    post_samples.to(device=device),
-                    x=X_0.to(device=device),
-                )
-                .cpu()
-                .numpy()
-            )
-
-            rec_post_samples, _ = hdr_obj.recal_sample(
-                y_hat=post_samples.reshape(
-                    1,
-                    post_samples.shape[0],
-                    post_samples.shape[1],
-                ),
-                f_hat_y_hat=prob_post.reshape(1, -1),
-            )
-            rec_post_samples = rec_post_samples[0, :, :]
-            hdr_mean = mean_list[i]
-            hdr_inv_matrix = inv_matrix_list[i]
-
-            # computing scores for HDR
-            hdr_conf_scores = np.zeros(rec_post_samples.shape[0])
-            for j in range(rec_post_samples.shape[0]):
-                if hdr_mean.shape[0] > 1:
-                    sel_sample = rec_post_samples[j, :]
-                    hdr_conf_scores[j] = (
-                        (hdr_mean - sel_sample).transpose()
-                        @ hdr_inv_matrix
-                        @ (hdr_mean - sel_sample)
+            if base_model != "NPSE":
+                # obtaining conf_scores for the recalibration approach
+                # obtaining recalibrated samples first
+                prob_post = np.exp(
+                    post_estim.log_prob(
+                        post_samples.to(device=device),
+                        x=X_0.to(device=device),
                     )
-                else:
-                    sel_sample = rec_post_samples[j]
-                    hdr_conf_scores[j] = (hdr_mean - sel_sample) ** 2 / (hdr_inv_matrix)
+                    .cpu()
+                    .numpy()
+                )
+                rec_post_samples, _ = hdr_obj.recal_sample(
+                    y_hat=post_samples.reshape(
+                        1,
+                        post_samples.shape[0],
+                        post_samples.shape[1],
+                    ),
+                    f_hat_y_hat=prob_post.reshape(1, -1),
+                )
+                rec_post_samples = rec_post_samples[0, :, :]
+                hdr_mean = mean_list[i]
+                hdr_inv_matrix = inv_matrix_list[i]
+
+                # computing scores for HDR
+                hdr_conf_scores = np.zeros(rec_post_samples.shape[0])
+                for j in range(rec_post_samples.shape[0]):
+                    if hdr_mean.shape[0] > 1:
+                        sel_sample = rec_post_samples[j, :]
+                        hdr_conf_scores[j] = (
+                            (hdr_mean - sel_sample).transpose()
+                            @ hdr_inv_matrix
+                            @ (hdr_mean - sel_sample)
+                        )
+                    else:
+                        sel_sample = rec_post_samples[j]
+                        hdr_conf_scores[j] = (hdr_mean - sel_sample) ** 2 / (
+                            hdr_inv_matrix
+                        )
 
         # computing coverage
         coverage_locart[i] = np.mean(conf_scores <= locart_cutoff[i])
@@ -642,22 +671,35 @@ def compute_coverage(
         coverage_cdf[i] = np.mean(conf_scores <= cdf_cutoff[i])
         coverage_local_cdf[i] = np.mean(conf_scores <= local_cdf_cutoff[i])
         coverage_a_locart[i] = np.mean(conf_scores <= alocart_cutoff[i])
-        coverage_hdr[i] = np.mean(hdr_conf_scores <= hdr_cutoff[i])
+        if base_model != "NPSE":
+            coverage_hdr[i] = np.mean(hdr_conf_scores <= hdr_cutoff[i])
 
         i += 1
 
     # Creating a pandas DataFrame with the mean coverage values
-    coverage_df = pd.DataFrame(
-        {
-            "LOCART MAD": [np.mean(np.abs(coverage_locart - (1 - alpha)))],
-            "A-LOCART MAD": [np.mean(np.abs(coverage_a_locart - (1 - alpha)))],
-            "Global CP MAD": [np.mean(np.abs(coverage_global - (1 - alpha)))],
-            "Naive MAD": [np.mean(np.abs(coverage_naive - (1 - alpha)))],
-            "CDF MAD": [np.mean(np.abs(coverage_cdf - (1 - alpha)))],
-            "Local CDF MAD": [np.mean(np.abs(coverage_local_cdf - (1 - alpha)))],
-            "HDR MAD": [np.mean(np.abs(coverage_hdr - (1 - alpha)))],
-        }
-    )
+    if base_model != "NPSE":
+        coverage_df = pd.DataFrame(
+            {
+                "LOCART MAD": [np.mean(np.abs(coverage_locart - (1 - alpha)))],
+                "A-LOCART MAD": [np.mean(np.abs(coverage_a_locart - (1 - alpha)))],
+                "Global CP MAD": [np.mean(np.abs(coverage_global - (1 - alpha)))],
+                "Naive MAD": [np.mean(np.abs(coverage_naive - (1 - alpha)))],
+                "CDF MAD": [np.mean(np.abs(coverage_cdf - (1 - alpha)))],
+                "Local CDF MAD": [np.mean(np.abs(coverage_local_cdf - (1 - alpha)))],
+                "HDR MAD": [np.mean(np.abs(coverage_hdr - (1 - alpha)))],
+            }
+        )
+    else:
+        coverage_df = pd.DataFrame(
+            {
+                "LOCART MAD": [np.mean(np.abs(coverage_locart - (1 - alpha)))],
+                "A-LOCART MAD": [np.mean(np.abs(coverage_a_locart - (1 - alpha)))],
+                "Global CP MAD": [np.mean(np.abs(coverage_global - (1 - alpha)))],
+                "Naive MAD": [np.mean(np.abs(coverage_naive - (1 - alpha)))],
+                "CDF MAD": [np.mean(np.abs(coverage_cdf - (1 - alpha)))],
+                "Local CDF MAD": [np.mean(np.abs(coverage_local_cdf - (1 - alpha)))],
+            }
+        )
     return coverage_df
 
 
@@ -684,12 +726,21 @@ def compute_coverage_repeated(
     coverage_results = []
 
     # Initialize a list to store checkpoints
-    checkpoint_path = os.path.join(original_path, "Results", "MAE_results")
-    os.makedirs(checkpoint_path, exist_ok=True)
-    checkpoint_file = os.path.join(
-        checkpoint_path, f"{score_type}_{task_name}_checkpoints.pkl"
-    )
-
+    if base_model == "NPE":
+        checkpoint_path = os.path.join(original_path, "Results", "MAE_results")
+        os.makedirs(checkpoint_path, exist_ok=True)
+        checkpoint_file = os.path.join(
+            checkpoint_path, f"{score_type}_{task_name}_checkpoints.pkl"
+        )
+    else:
+        checkpoint_path = os.path.join(
+            original_path, "Results", f"MAE_results_{base_model}"
+        )
+        os.makedirs(checkpoint_path, exist_ok=True)
+        checkpoint_file = os.path.join(
+            checkpoint_path, f"{score_type}_{task_name}_checkpoints.pkl"
+        )
+        print(checkpoint_file)
     # Check if the checkpoint file exists
     if os.path.exists(checkpoint_file):
         with open(checkpoint_file, "rb") as f:
@@ -757,9 +808,15 @@ all_coverage_df = compute_coverage_repeated(
     sample_with=sample_with,
 )
 
-# Create the "MAE_results" folder if it doesn't exist
-mae_results_path = os.path.join(original_path, "Results", "MAE_results")
-os.makedirs(mae_results_path, exist_ok=True)
+# Create the "MAE_results" folder if it doesn't exist for NPE
+if base_model == "NPE":
+    mae_results_path = os.path.join(original_path, "Results", "MAE_results")
+    os.makedirs(mae_results_path, exist_ok=True)
+else:
+    mae_results_path = os.path.join(
+        original_path, "Results", f"MAE_results_{base_model}"
+    )
+    os.makedirs(mae_results_path, exist_ok=True)
 
 # Save the all_coverage_df DataFrame to a CSV file
 csv_path = os.path.join(
