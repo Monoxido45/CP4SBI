@@ -545,7 +545,7 @@ def compute_coverage(
     i = 0
     # evaluating cutoff for each observation
     for X_0, theta_0 in tqdm(
-        zip(X_test, theta_test), desc="Computing naive cutoff for each test set"
+        zip(X_test, thetas_test), desc="Computing naive cutoff for each test set"
     ):
 
         if score_type == "HPD":
