@@ -546,7 +546,12 @@ def compute_coverage(
 
         if score_type == "HPD":
             # computing naive cutoff
-            if task_name == "sir":
+            if (
+                task_name == "sir"
+                or task_name == "gaussian_linear"
+                or task_name == "gaussian_linear_uniform"
+                or task_name == "gaussian_mixture"
+            ):
                 closest_t = naive_method(
                     post_estim,
                     X=X_0,
