@@ -382,7 +382,7 @@ def compute_coverage(
 
             for j in range(num_rounds):
                 theta, x = simulate_for_sbi(
-                    cpu_simulator, proposal, num_simulations=1000
+                    cpu_simulator, proposal, num_simulations=2000
                 )
                 theta, x = theta.to(device), x.to(device)
                 density_estimator = base_inference.append_simulations(

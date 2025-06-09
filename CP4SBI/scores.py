@@ -4,6 +4,7 @@ import numpy as np
 from sklearn.base import clone
 import torch
 from copy import deepcopy
+from scipy.stats import gaussian_kde
 
 
 # defining score basic class
@@ -43,6 +44,86 @@ class sbi_Scores(ABC):
         Output: Conformity score vector
         """
         pass
+
+
+class KDE_HPDScore(sbi_Scores):
+    def fit(self, X=None, thetas=None, **kwargs):
+        # setting up model for SBI package
+        if not self.is_fitted:
+            if not isinstance(X, torch.Tensor) or X.dtype != torch.float32:
+                X = torch.tensor(X, dtype=torch.float32)
+            if not isinstance(thetas, torch.Tensor) or thetas.dtype != torch.float32:
+                thetas = torch.tensor(thetas, dtype=torch.float32)
+            self.inference_obj.append_simulations(thetas, X)
+            density = self.inference_obj.train()
+            self.posterior = self.inference_obj.build_posterior(density, **kwargs)
+        else:
+            if self.density is None:
+                self.posterior = self.inference_obj.build_posterior(**kwargs)
+            else:
+                density = deepcopy(self.density)
+                self.posterior = self.inference_obj.build_posterior(density, **kwargs)
+        return self
+
+    def compute(self, X_calib, thetas_calib, one_X=False, B=1000):
+        if not isinstance(X_calib, torch.Tensor) or X_calib.dtype != torch.float32:
+            X_calib = torch.tensor(X_calib, dtype=torch.float32)
+        if (
+            not isinstance(thetas_calib, torch.Tensor)
+            or thetas_calib.dtype != torch.float32
+        ):
+            thetas_calib = torch.tensor(thetas_calib, dtype=torch.float32)
+
+        if self.cuda:
+            X_calib = X_calib.to(device="cuda")
+            thetas_calib = thetas_calib.to(device="cuda")
+
+        # obtaining posterior estimators
+        if not one_X:
+            par_n = thetas_calib.shape[0]
+            prob_array = np.zeros(par_n)
+            for i in tqdm(range(par_n), desc="Computing KDE HPD scores"):
+                # fitting KDE for each X
+                # sampling
+                sample_generated = (
+                    self.posterior.sample(
+                        (B,),
+                        x=X_calib[i].reshape(1, -1),
+                        show_progress_bars=False,
+                    )
+                    .cpu()
+                    .detach()
+                    .numpy()
+                )
+
+                # fitting KDE
+                kde = gaussian_kde(sample_generated.T, bw_method="scott")
+
+                # computing log_prob for theta_calib
+                prob_array[i] = kde(thetas_calib[i].reshape(1, -1).numpy().T)[0]
+
+        else:
+            if len(X_calib.shape) == 1:
+                X_calib = X_calib.reshape(1, -1)
+
+            sample_generated = (
+                self.posterior.sample(
+                    (B,),
+                    x=X_calib,
+                    show_progress_bars=False,
+                )
+                .cpu()
+                .detach()
+                .numpy()
+            )
+
+            # fitting KDE
+            kde = gaussian_kde(sample_generated.T, bw_method="scott")
+
+            # computing log_prob for only one X
+            prob_array = kde(thetas_calib.numpy().T)
+        # computing posterior density for theta
+        return -(prob_array)
 
 
 # HPD score
