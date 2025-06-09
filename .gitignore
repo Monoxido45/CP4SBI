@@ -2,6 +2,7 @@
 /CP4SBI.egg-info
 HELP.txt 
 Experiments/sbi-logs/
+Experiments/vagner/sbi-logs/
 /CP4SBI/__pycache__/
 /sbi-logs/
 /tensorboard/
