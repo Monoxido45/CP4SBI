@@ -1,7 +1,7 @@
 # for posterior estimation and calibration
 import torch
 from sbi.utils import BoxUniform
-from sbi.inference import NPE, simulate_for_sbi
+from sbi.inference import NPE, NPSE
 from CP4SBI.baycon import BayCon
 from CP4SBI.scores import HPDScore, WALDOScore
 from sbi.utils.user_input_checks import process_prior
@@ -75,29 +75,48 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "--X_test_list",
+    "-X_list_t",
+    help="string indicating whether to use X_test_list or not",
+    default="False",
+    type=str,
+)
+parser.add_argument(
     "--B",
     "-B",
     help="int for simulation budget",
     default=10000,
     type=int,
 )
-
 parser.add_argument(
-    "--n_x",
-    "-nx",
-    help="number of X samples to be used",
-    default=500,
+    "--B_t",
+    "-B_t",
+    help="int for simulation budget for test set",
+    default=2000,
     type=int,
 )
-
 parser.add_argument(
     "--prop_calib",
     "-p_calib",
     help="float between 0 and 1 for proportion of calibration data",
     default=0.2,
-    type=float,
+    type=int,
+)
+parser.add_argument(
+    "--sample_with",
+    "-sw",
+    help="string for sampling method to be used inside direct_posterior",
+    default="direct",
+    type=str,
 )
 
+parser.add_argument(
+    "--base_model",
+    "-b_m",
+    help="string for base model to be used",
+    default="NPE",
+    type=str,
+)
 
 original_path = os.getcwd()
 if __name__ == "__main__":
@@ -108,12 +127,15 @@ else:
 task_name = args.task
 seed = args.seed
 B = args.B
+B_test = args.B_t
 p_calib = args.prop_calib
 n_rep = args.n_rep
 device = args.device
 score_type = args.score
 X_str = args.X_list == "True"
-num_obs = args.n_x
+X_str_t = args.X_test_list == "True"
+sample_with = args.sample_with
+base_model = args.base_model
 
 if X_str:
     # Load the X_list pickle file from the X_data folder
@@ -121,7 +143,7 @@ if X_str:
         original_path, "Results/X_data", f"{task_name}_X_samples_{B}.pkl"
     )
     with open(x_data_path, "rb") as f:
-        X_list = pickle.load(f)
+        X_data = pickle.load(f)
 
     # Load the X_list pickle file from the X_data folder
     theta_data_path = os.path.join(
@@ -130,9 +152,29 @@ if X_str:
     with open(theta_data_path, "rb") as f:
         theta_list = pickle.load(f)
 
-    X_dict = {"X": X_list, "theta": theta_list}
+    X_list = {"X": X_data, "theta": theta_list}
 else:
-    X_dict = None
+    X_list = None
+
+
+if X_str_t:
+    # Load the X_test_list pickle file from the X_data folder
+    x_test_data_path = os.path.join(
+        original_path, "Results/X_data", f"{task_name}_X_test_samples_{B_test}.pkl"
+    )
+    with open(x_test_data_path, "rb") as f:
+        X_test_data = pickle.load(f)
+
+    # Load the theta_test_list pickle file from the X_data folder
+    theta_test_data_path = os.path.join(
+        original_path, "Results/X_data", f"{task_name}_theta_test_samples_{B_test}.pkl"
+    )
+    with open(theta_test_data_path, "rb") as f:
+        theta_test_list = pickle.load(f)
+
+    X_test_list = {"X_test": X_test_data, "theta_test": theta_test_list}
+else:
+    X_test_list = None
 
 # Set the random seed for reproducibility
 alpha = 0.1
@@ -262,38 +304,23 @@ elif task_name == "lotka_volterra":
     prior_NPE, _, _ = process_prior(prior_dist)
 
 
-# unused simulators
-# elif task.name == "bernoulli_glm":
-# setting parameters for prior distribution
-#    M = task.dim_parameters - 1
-#    D = torch.diag(torch.ones(M)) - torch.diag(torch.ones(M - 1), -1)
-#    F = torch.matmul(D, D) + torch.diag(1.0 * torch.arange(M) / (M)) ** 0.5
-#    Binv = torch.zeros(size=(M + 1, M + 1))
-#    Binv[0, 0] = 0.5  # offset
-#    Binv[1:, 1:] = torch.matmul(F.T, F)
-# setting up prior distribution using torch
-#    prior_params = {"loc": torch.zeros((M + 1,)), "precision_matrix": Binv}
-#    prior_dist = MultivariateNormal(**prior_params, validate_args=False)
-#    prior_NPE, _, _ = process_prior(prior_dist)
-
-
 def compute_coverage(
     prior_NPE,
     score_type,
+    split_calib=False,
     X=None,
     theta=None,
+    X_test=None,
+    theta_test=None,
     B=5000,
     prop_calib=0.2,
     alpha=0.1,
-    num_obs=500,
     task_name="two_moons",
     device="cuda",
     random_seed=0,
     min_samples_leaf=300,
     naive_samples=1000,
-    sequential=False,
-    num_rounds=10,
-    split_calib=False,
+    sample_with="direct",
 ):
     # fixing task
     task = sbibm.get_task(task_name)
@@ -301,17 +328,14 @@ def compute_coverage(
     simulator = task.get_simulator()
 
     # setting seet
-    torch.manual_seed(random_seed)
-    torch.cuda.manual_seed(random_seed)
+    if not task_name == "gaussian_mixture":
+        torch.manual_seed(random_seed)
+        torch.cuda.manual_seed(random_seed)
 
     # checking if X_list is None or not
     # splitting simulation budget
     B_train = int(B * (1 - prop_calib))
     B_calib = int(B * prop_calib)
-
-    def cpu_simulator(parameters):
-        with torch.no_grad():
-            return simulator(parameters.cpu())
 
     if X is None and theta is None:
         # training samples
@@ -335,6 +359,31 @@ def compute_coverage(
         theta_train = theta[train_indices]
         thetas_calib = theta[calib_indices]
 
+    if X_test is None and theta_test is None:
+        # training conformal methods
+        thetas_test = prior(num_samples=B_test)
+        X_test = simulator(thetas_calib)
+
+    else:
+        thetas_test = theta_test
+        X_test = X_test
+
+    if base_model == "NPE":
+        # fitting NPE
+        inference = NPE(prior_NPE, device=device)
+        inference.append_simulations(
+            theta_train,
+            X_train,
+        ).train()
+
+    elif base_model == "NPSE":
+        # fitting diffusion model
+        inference = NPSE(prior_NPE, device=device)
+        inference.append_simulations(
+            theta=theta_train.to(device),
+            x=X_train.to(device),
+        ).train()
+
     cuda = device == "cuda"
 
     # checking score type
@@ -343,210 +392,169 @@ def compute_coverage(
     elif score_type == "WALDO":
         score_used = WALDOScore
 
-    coverage_locart = np.zeros(num_obs)
-    coverage_global = np.zeros(num_obs)
-    coverage_cdf = np.zeros(num_obs)
-    coverage_naive = np.zeros(num_obs)
-    coverage_local_cdf = np.zeros(num_obs)
-    coverage_a_locart = np.zeros(num_obs)
-    coverage_hdr = np.zeros(num_obs)
-
-    # Load the dictionary from the pickle file
-    posterior_data_path = (
-        original_path + f"/Results/posterior_data/{task_name}_posterior_samples.pkl"
+    print("Computing conformal scores")
+    cdf_conf = BayCon(
+        sbi_score=score_used,
+        base_inference=inference,
+        is_fitted=True,
+        conformal_method="CDF",
+        cuda=cuda,
+        alpha=alpha,
     )
-    with open(posterior_data_path, "rb") as f:
-        X_dict = pickle.load(f)
 
-    if num_obs < len(X_dict.keys()):
-        X_dict = {k: X_dict[k] for k in list(X_dict.keys())[:num_obs]}
+    cdf_conf.fit(
+        X=X_train,
+        theta=theta_train,
+        sample_with=sample_with,
+    )
 
-    X_obs = torch.cat(list(X_dict.keys())).numpy()
+    res = cdf_conf.cdf_split.sbi_score.compute(X_calib, thetas_calib)
+
+    # CDF split
+    print("Fitting CDF split")
+
+    cdf_conf.calib(
+        X_calib=X_calib,
+        theta_calib=res,
+        using_res=True,
+    )
+
+    print("Fitting local CDF split")
+    # CDF split + LOCART
+    local_cdf_conf = BayCon(
+        sbi_score=score_used,
+        base_inference=inference,
+        is_fitted=True,
+        conformal_method="CDF local",
+        split_calib=split_calib,
+        cuda=cuda,
+        alpha=alpha,
+    )
+
+    local_cdf_conf.fit(
+        X=X_train,
+        theta=theta_train,
+        sample_with=sample_with,
+    )
+
+    local_cdf_conf.calib(
+        X_calib=X_calib,
+        theta_calib=res,
+        min_samples_leaf=min_samples_leaf,
+        using_res=True,
+    )
+
+    # fitting LOCART
+    print("Fitting LOCART")
+    bayes_conf = BayCon(
+        sbi_score=score_used,
+        base_inference=inference,
+        is_fitted=True,
+        conformal_method="local",
+        split_calib=split_calib,
+        cuda=cuda,
+        alpha=alpha,
+    )
+    bayes_conf.fit(
+        X=X_train,
+        theta=theta_train,
+    )
+    bayes_conf.calib(
+        X_calib=X_calib,
+        theta_calib=res,
+        min_samples_leaf=min_samples_leaf,
+        using_res=True,
+    )
+
+    # fitting LOCART
+    print("Fitting A-LOCART")
+    w_bayes_conf = BayCon(
+        sbi_score=score_used,
+        base_inference=inference,
+        is_fitted=True,
+        conformal_method="local",
+        weighting=True,
+        split_calib=split_calib,
+        cuda=cuda,
+        alpha=alpha,
+    )
+    w_bayes_conf.fit(
+        X=X_train,
+        theta=theta_train,
+        sample_with=sample_with,
+    )
+    w_bayes_conf.calib(
+        X_calib=X_calib,
+        theta_calib=res,
+        min_samples_leaf=min_samples_leaf,
+        using_res=True,
+    )
+
+    # global
+    print("Fitting global conformal")
+    global_conf = BayCon(
+        sbi_score=score_used,
+        base_inference=inference,
+        is_fitted=True,
+        conformal_method="global",
+        cuda=cuda,
+        alpha=alpha,
+    )
+
+    global_conf.fit(
+        X=X_train,
+        theta=theta_train,
+    )
+
+    global_conf.calib(
+        X_calib=X_calib,
+        theta_calib=res,
+        using_res=True,
+    )
+
+    post_estim = deepcopy(bayes_conf.locart.sbi_score.posterior)
+
+    # HDR recalibration
+    print("Fitting HDR recalibration")
+    hdr_cutoff, hdr_obj = hdr_method(
+        post_estim=inference,
+        X_calib=X_calib,
+        thetas_calib=thetas_calib,
+        n_grid=1000,
+        X_test=X_test,
+        is_fitted=True,
+        alpha=alpha,
+        score_type=score_type,
+        device=device,
+    )
+
+    locart_cutoff = bayes_conf.predict_cutoff(X_test)
+    global_cutoff = global_conf.predict_cutoff(X_test)
+    cdf_cutoff = cdf_conf.predict_cutoff(X_test)
+    local_cdf_cutoff = local_cdf_conf.predict_cutoff(X_test)
+    alocart_cutoff = w_bayes_conf.predict_cutoff(X_test)
+
+    coverage_locart = np.zeros(X_test.shape[0])
+    coverage_global = np.zeros(X_test.shape[0])
+    coverage_naive = np.zeros(X_test.shape[0])
+    coverage_cdf = np.zeros(X_test.shape[0])
+    coverage_local_cdf = np.zeros(X_test.shape[0])
+    coverage_a_locart = np.zeros(X_test.shape[0])
+    coverage_hdr = np.zeros(X_test.shape[0])
 
     i = 0
-    dict_keys = list(X_dict.keys())
     # evaluating cutoff for each observation
-    for X_0 in tqdm(dict_keys, desc="Computing coverage across observations"):
-        post_samples = X_dict[X_0]
-
-        # dummy SNPE inference object
-        base_inference = NPE(prior=prior_NPE, device=device)
-
-        if sequential:
-            print("Fitting SNPE in sequential mode")
-            x_o = X_0
-
-            # Fitting SNPE
-            posteriors = []
-            proposal = prior_NPE
-
-            for j in range(num_rounds):
-                theta, x = simulate_for_sbi(
-                    cpu_simulator, proposal, num_simulations=1000
-                )
-                theta, x = theta.to(device), x.to(device)
-                density_estimator = base_inference.append_simulations(
-                    theta, x, proposal=proposal
-                ).train(force_first_round_loss=True)
-
-                # using warm start for the first round
-                # if j == 0:
-                # density_estimator.load_state_dict(trained_net.state_dict())
-
-                posterior = base_inference.build_posterior(density_estimator)
-                posteriors.append(posterior)
-                proposal = posterior.set_default_x(x_o)
-
-        # initializing inference object by the last density estimator
-        # CDF split
-        cdf_conf = BayCon(
-            sbi_score=score_used,
-            base_inference=base_inference,
-            is_fitted=True,
-            conformal_method="CDF",
-            cuda=cuda,
-            alpha=alpha,
-            density=density_estimator,
-        )
-
-        cdf_conf.fit(
-            X=X_train,
-            theta=theta_train,
-        )
-
-        # CDF split + LOCART
-        local_cdf_conf = BayCon(
-            sbi_score=score_used,
-            base_inference=base_inference,
-            is_fitted=True,
-            conformal_method="CDF local",
-            split_calib=split_calib,
-            cuda=cuda,
-            alpha=alpha,
-            density=density_estimator,
-        )
-
-        local_cdf_conf.fit(
-            X=X_train,
-            theta=theta_train,
-        )
-
-        # fitting LOCART
-        bayes_conf = BayCon(
-            sbi_score=score_used,
-            base_inference=base_inference,
-            is_fitted=True,
-            conformal_method="local",
-            cuda=cuda,
-            alpha=alpha,
-            density=density_estimator,
-        )
-        bayes_conf.fit(
-            X=X_train,
-            theta=theta_train,
-        )
-
-        # fitting LOCART
-        w_bayes_conf = BayCon(
-            sbi_score=score_used,
-            base_inference=base_inference,
-            is_fitted=True,
-            conformal_method="local",
-            weighting=True,
-            split_calib=split_calib,
-            cuda=cuda,
-            alpha=alpha,
-            density=density_estimator,
-        )
-        w_bayes_conf.fit(
-            X=X_train,
-            theta=theta_train,
-        )
-
-        # global
-        global_conf = BayCon(
-            sbi_score=score_used,
-            base_inference=base_inference,
-            is_fitted=True,
-            conformal_method="global",
-            cuda=cuda,
-            alpha=alpha,
-            density=density_estimator,
-        )
-
-        global_conf.fit(
-            X=X_train,
-            theta=theta_train,
-        )
-
-        # computing scores only one time
-        res = cdf_conf.cdf_split.sbi_score.compute(
-            X_calib,
-            thetas_calib,
-        )
-
-        # fitting LOCART, CDF split and global after changing base model to SNPE
-        print("Fitting LOCART")
-        bayes_conf.calib(
-            X_calib=X_calib,
-            theta_calib=res,
-            min_samples_leaf=min_samples_leaf,
-            using_res=True,
-        )
-        print("Fitting A-LOCART")
-        w_bayes_conf.calib(
-            X_calib=X_calib,
-            theta_calib=res,
-            min_samples_leaf=min_samples_leaf,
-            using_res=True,
-        )
-        print("Fitting CDF-split")
-        cdf_conf.calib(
-            X_calib=X_calib,
-            theta_calib=res,
-            using_res=True,
-        )
-        print("Fitting CDF-split local")
-        local_cdf_conf.calib(
-            X_calib=X_calib,
-            theta_calib=res,
-            min_samples_leaf=min_samples_leaf,
-            using_res=True,
-        )
-        print("Fitting global conformal")
-        global_conf.calib(
-            X_calib=X_calib,
-            theta_calib=res,
-            using_res=True,
-        )
-
-        print("Fitting HDR recalibration")
-        if score_type == "HPD":
-            hdr_cutoff, hdr_obj = hdr_method(
-                post_estim=base_inference,
-                X_calib=X_calib,
-                thetas_calib=thetas_calib,
-                n_grid=1000,
-                X_test=X_0,
-                is_fitted=True,
-                alpha=alpha,
-                score_type=score_type,
-                device=device,
-                post_dens=density_estimator,
-            )
-
-        locart_cutoff = bayes_conf.predict_cutoff(X_0)
-        global_cutoff = global_conf.predict_cutoff(X_0)
-        cdf_cutoff = cdf_conf.predict_cutoff(X_0)
-        local_cdf_cutoff = local_cdf_conf.predict_cutoff(X_0)
-        alocart_cutoff = w_bayes_conf.predict_cutoff(X_0)
-
-        # computing naive cutoff
-        post_estim = deepcopy(posterior)
+    for X_0, theta_0 in tqdm(
+        zip(X_test, theta_test), desc="Computing naive cutoff for each test set"
+    ):
 
         if score_type == "HPD":
             # computing naive cutoff
-            if task_name == "sir":
+            if (
+                task_name == "sir"
+                or task_name == "lotka_volterra"
+                or task_name == "gaussian_linear"
+            ):
                 closest_t = naive_method(
                     post_estim,
                     X=X_0,
@@ -565,98 +573,57 @@ def compute_coverage(
                     device=device,
                     B_naive=naive_samples,
                 )
+            if len(X_0.shape) == 1:
+                X_0 = X_0.reshape(1, -1)
+            if len(theta_0.shape) == 1:
+                theta_0 = theta_0.reshape(1, -1)
 
-            # computing scores
-            conf_scores = -np.exp(
+            # computing scores for naive, locart, global, cdf, local_cdf, and alocart
+            conf_score = -np.exp(
                 post_estim.log_prob(
-                    post_samples.to(device=device),
+                    theta_0.to(device=device),
                     x=X_0.to(device=device),
                 )
                 .cpu()
                 .numpy()
             )
 
-            # computing scores for HDR
+            # computing score for HDR
             _, dens_samples = hdr_obj.recal_sample(
-                y_hat=post_samples.reshape(
+                y_hat=theta_0.reshape(
                     1,
-                    post_samples.shape[0],
-                    post_samples.shape[1],
+                    theta_0.shape[0],
+                    theta_0.shape[1],
                 ),
-                f_hat_y_hat=-conf_scores.reshape(1, -1),
+                f_hat_y_hat=-conf_score.reshape(1, -1),
             )
 
-            hdr_conf_scores = -dens_samples[0, :]
-
-        elif score_type == "WALDO":
-            # computing naive cutoff
-            if task_name == "sir":
-                closest_t, mean_array, inv_matrix = naive_method(
-                    X=X,
-                    alpha=alpha,
-                    score_type=score_type,
-                    device=device,
-                    B_naive=naive_samples,
-                    n_grid=700,
-                )
-            else:
-                closest_t, mean_array, inv_matrix = naive_method(
-                    post_estim,
-                    X=X,
-                    alpha=alpha,
-                    score_type=score_type,
-                    device=device,
-                    B_naive=naive_samples,
-                )
-
-            # computing scores
-            conf_scores = np.zeros(post_samples.shape[0])
-            for j in range(post_samples.shape[0]):
-                if mean_array.shape[0] > 1:
-                    sel_sample = post_samples[j, :].cpu().numpy()
-                    conf_scores[j] = (
-                        (mean_array - sel_sample).transpose()
-                        @ inv_matrix
-                        @ (mean_array - sel_sample)
-                    )
-                else:
-                    sel_sample = post_samples[j].cpu().numpy()
-                    conf_scores[j] = (mean_array - sel_sample) ** 2 / (inv_matrix)
+            hdr_conf_score = -dens_samples[0, :]
 
         # computing coverage
-        coverage_locart[i] = np.mean(conf_scores <= locart_cutoff)
-        coverage_global[i] = np.mean(conf_scores <= global_cutoff)
-        coverage_naive[i] = np.mean(conf_scores <= closest_t)
-        coverage_cdf[i] = np.mean(conf_scores <= cdf_cutoff)
-        coverage_local_cdf[i] = np.mean(conf_scores <= local_cdf_cutoff)
-        coverage_a_locart[i] = np.mean(conf_scores <= alocart_cutoff)
-        coverage_hdr[i] = np.mean(hdr_conf_scores <= hdr_cutoff)
-
-        print(f"A-LOCART Coverage for observation {i}: {coverage_a_locart[i]}")
-        print(f"Naive Coverage for observation {i}: {coverage_naive[i]}")
-        # Printing CDF and Local CDF coverage for the current observation
-        print(f"CDF Coverage for observation {i}: {np.mean(conf_scores <= cdf_cutoff)}")
-        print(
-            f"Local CDF Coverage for observation {i}: {np.mean(conf_scores <= local_cdf_cutoff)}"
-        )
-        print(
-            f"Global Coverage for observation {i}: {np.mean(conf_scores <= global_cutoff)}"
-        )
+        coverage_locart[i] = conf_score <= locart_cutoff[i]
+        coverage_global[i] = conf_score <= global_cutoff[i]
+        coverage_naive[i] = conf_score <= closest_t
+        coverage_cdf[i] = conf_score <= cdf_cutoff[i]
+        coverage_local_cdf[i] = conf_score <= local_cdf_cutoff[i]
+        coverage_a_locart[i] = conf_score <= alocart_cutoff[i]
+        coverage_hdr[i] = hdr_conf_score <= hdr_cutoff[i]
 
         i += 1
 
     # Creating a pandas DataFrame with the mean coverage values
     coverage_df = pd.DataFrame(
         {
-            "LOCART MAD": [np.mean(np.abs(coverage_locart - (1 - alpha)))],
-            "A-LOCART MAD": [np.mean(np.abs(coverage_a_locart - (1 - alpha)))],
-            "Global CP MAD": [np.mean(np.abs(coverage_global - (1 - alpha)))],
-            "Naive MAD": [np.mean(np.abs(coverage_naive - (1 - alpha)))],
-            "CDF MAD": [np.mean(np.abs(coverage_cdf - (1 - alpha)))],
-            "Local CDF MAD": [np.mean(np.abs(coverage_local_cdf - (1 - alpha)))],
-            "HDR MAD": [np.mean(np.abs(coverage_hdr - (1 - alpha)))],
+            "LOCART MAD": [np.mean(coverage_locart)],
+            "A-LOCART MAD": [np.mean(coverage_a_locart)],
+            "Global CP MAD": [np.mean(coverage_global)],
+            "Naive MAD": [np.mean(coverage_naive)],
+            "CDF MAD": [np.mean(coverage_cdf)],
+            "Local CDF MAD": [np.mean(coverage_local_cdf)],
+            "HDR MAD": [np.mean(coverage_hdr)],
         }
     )
+
     return coverage_df
 
 
@@ -667,32 +634,26 @@ def compute_coverage_repeated(
     B=5000,
     prop_calib=0.2,
     alpha=0.1,
-    num_obs=500,
     task_name="two_moons",
     device="cuda",
     central_seed=0,
     min_samples_leaf=150,
     naive_samples=1000,
     n_rep=30,
-    sequential=True,
-    num_rounds=5,
+    sample_with="direct",
 ):
     # Generate an array of seeds using the central_seed
-    # seeds = np.random.RandomState(central_seed).randint(0, 2**32 - 1, size=n_rep)
-    seeds = np.random.RandomState(central_seed).randint(0, 2**31 - 1, size=n_rep)
+    seeds = np.random.RandomState(central_seed).randint(0, 2**32 - 1, size=n_rep)
 
     # Initialize an empty list to store coverage results
     coverage_results = []
 
     # Initialize a list to store checkpoints
-    checkpoint_path = os.path.join(
-        original_path, "Experiments/vagner/Results", "MAE_results"
-    )
+    checkpoint_path = os.path.join(original_path, "Results", "Marginal_results")
     os.makedirs(checkpoint_path, exist_ok=True)
     checkpoint_file = os.path.join(
         checkpoint_path, f"{score_type}_{task_name}_checkpoints.pkl"
     )
-
     # Check if the checkpoint file exists
     if os.path.exists(checkpoint_file):
         with open(checkpoint_file, "rb") as f:
@@ -700,15 +661,19 @@ def compute_coverage_repeated(
 
     # Start the loop from the length of the checkpoint list
     start_index = len(coverage_results)
+    if task_name == "gaussian_mixture":
+        torch.manual_seed(central_seed)
+        torch.cuda.manual_seed(central_seed)
+
     # Adjust the loop to start from the start_index
-    for i, seed in enumerate(
+    for j, seed in enumerate(
         tqdm(seeds[start_index:], desc="Computing coverage for each seed"),
         start=start_index,
     ):
         # checking X_list
         if X_list is not None:
-            X = X_list["X"][i]
-            theta = X_list["theta"][i]
+            X = X_list["X"][j]
+            theta = X_list["theta"][j]
         else:
             X = None
             theta = None
@@ -721,14 +686,12 @@ def compute_coverage_repeated(
             B=B,
             prop_calib=prop_calib,
             alpha=alpha,
-            num_obs=num_obs,
             task_name=task_name,
             device=device,
             random_seed=seed,
             min_samples_leaf=min_samples_leaf,
             naive_samples=naive_samples,
-            sequential=True,
-            num_rounds=num_rounds,
+            sample_with=sample_with,
         )
         coverage_results.append(coverage_df)
 
@@ -743,30 +706,27 @@ def compute_coverage_repeated(
 all_coverage_df = compute_coverage_repeated(
     score_type=score_type,
     prior_NPE=prior_NPE,
-    X_list=X_dict,
+    X_list=X_list,
     B=B,
     prop_calib=p_calib,
     alpha=alpha,
-    num_obs=num_obs,
     task_name=task_name,
     device=device,
     central_seed=seed,
     min_samples_leaf=300,
     naive_samples=1000,
     n_rep=n_rep,
-    sequential=True,
-    num_rounds=10,
+    sample_with=sample_with,
 )
 
-# Create the "MAE_results" folder if it doesn't exist
-mae_results_path = os.path.join(
-    original_path, "Experiments/vagner/Results", "MAE_results"
-)
+# Create the "MAE_results" folder if it doesn't exist for NPE
+mae_results_path = os.path.join(original_path, "Results", "Marginal_results")
 os.makedirs(mae_results_path, exist_ok=True)
+
 
 # Save the all_coverage_df DataFrame to a CSV file
 csv_path = os.path.join(
-    mae_results_path, f"{score_type}_{task_name}_coverage_results.csv"
+    mae_results_path, f"{score_type}_{task_name}_coverage_results_{B}.csv"
 )
 all_coverage_df.to_csv(csv_path, index=False)
 
@@ -777,7 +737,7 @@ summary_stats = summary_stats.drop(index="std")  # Drop standard deviation row
 
 # Save the summary statistics to a CSV file
 summary_csv_path = os.path.join(
-    mae_results_path, f"{score_type}_{task_name}_coverage_summary.csv"
+    mae_results_path, f"{score_type}_{task_name}_coverage_summary_{B}.csv"
 )
 summary_stats.to_csv(summary_csv_path)
 

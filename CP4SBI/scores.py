@@ -3,6 +3,7 @@ from tqdm import tqdm
 import numpy as np
 from sklearn.base import clone
 import torch
+from copy import deepcopy
 
 
 # defining score basic class
@@ -13,10 +14,11 @@ class sbi_Scores(ABC):
     ----------------------------------------------------------------
     """
 
-    def __init__(self, inference_obj, is_fitted=False, cuda=False):
+    def __init__(self, inference_obj, is_fitted=False, cuda=False, density_obj=None):
         self.inference_obj = inference_obj
         self.is_fitted = is_fitted
         self.cuda = cuda
+        self.density = density_obj
 
     @abstractmethod
     def fit(self, X, theta):
@@ -53,9 +55,14 @@ class HPDScore(sbi_Scores):
             if not isinstance(thetas, torch.Tensor) or thetas.dtype != torch.float32:
                 thetas = torch.tensor(thetas, dtype=torch.float32)
             self.inference_obj.append_simulations(thetas, X)
-            self.inference_obj.train()
-
-        self.posterior = self.inference_obj.build_posterior(**kwargs)
+            density = self.inference_obj.train()
+            self.posterior = self.inference_obj.build_posterior(density, **kwargs)
+        else:
+            if self.density is None:
+                self.posterior = self.inference_obj.build_posterior(**kwargs)
+            else:
+                density = deepcopy(self.density)
+                self.posterior = self.inference_obj.build_posterior(density, **kwargs)
         return self
 
     def compute(self, X_calib, thetas_calib, one_X=False):
@@ -113,10 +120,13 @@ class WALDOScore(sbi_Scores):
                 X = torch.tensor(X, dtype=torch.float32)
             if not isinstance(thetas, torch.Tensor) or thetas.dtype != torch.float32:
                 thetas = torch.tensor(thetas, dtype=torch.float32)
-            self.inference_obj.append_simulations(thetas, X)
-            self.inference_obj.train()
+            if self.density is None:
+                self.inference_obj.append_simulations(thetas, X)
+                density = self.inference_obj.train()
+            else:
+                density = deepcopy(self.density)
 
-        self.posterior = self.inference_obj.build_posterior(**kwargs)
+        self.posterior = self.inference_obj.build_posterior(density, **kwargs)
         return self
 
     def compute(self, X_calib, thetas_calib, one_X=False, B=1000, trace=True):
@@ -272,6 +282,3 @@ class QuantileScore(sbi_Scores):
 
         # computing quantile score posterior for theta
         return quantile_array
-
-
-# TODO: waldo score and quantile score

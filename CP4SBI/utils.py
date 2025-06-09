@@ -501,12 +501,14 @@ def hdr_method(
     grid_step=0.005,
     n_grid=700,
     is_fitted=True,
+    post_dens=None,
 ):
     # using HPDscore to compute posterior probabilities
     bayes_score = HPDScore(
         post_estim,
         is_fitted=is_fitted,
         cuda=device == "cuda",
+        density_obj=post_dens,
     )
     bayes_score.fit(X_train, theta_train)
 

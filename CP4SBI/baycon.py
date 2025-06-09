@@ -33,6 +33,7 @@ class LocartInf(BaseEstimator):
         split_calib=True,
         weighting=False,
         cuda=False,
+        density=None,
     ):
         """
         Input: (i)    sbi_score: Bayesian score of choosing. It can be specified by instantiating a Bayesian score class based on the sbi_Scores basic class.
@@ -43,14 +44,16 @@ class LocartInf(BaseEstimator):
                (vi)   split_calib: Boolean designating if we should split the calibration set into partitioning and cutoff set. Default is True.
                (viii) weighting: Set whether we should augment the feature space with conditional variance estimates. Default is False.
         """
+        self.density = density
+        self.base_inference = base_inference
         self.sbi_score = sbi_score(
             base_inference,
             is_fitted=is_fitted,
             cuda=cuda,
+            density_obj=density,
         )
 
         # checking if base model is fitted
-        self.base_inference = self.sbi_score.inference_obj
         self.alpha = alpha
         self.cart_type = cart_type
         self.split_calib = split_calib
@@ -319,6 +322,7 @@ class CDFSplit(BaseEstimator):
         cuda=False,
         local_cutoffs=False,
         split_calib=False,
+        density=None,
     ):
         """
         Input: (i)    sbi_score: Bayesian score of choosing. It can be specified by instantiating a Bayesian score class based on the sbi_Scores basic class.
@@ -328,10 +332,13 @@ class CDFSplit(BaseEstimator):
                (v)    cuda: Boolean indicating whether to use GPU or not.
                (vi)   local_cutoffs: Boolean indicating whether to use local cutoffs derived by LOCART or not.
         """
+        self.density = density
+        self.base_inference = base_inference
         self.sbi_score = sbi_score(
             base_inference,
             is_fitted=is_fitted,
             cuda=cuda,
+            density_obj=density,
         )
 
         # checking if base model is fitted
@@ -620,6 +627,7 @@ class BayCon:
         split_calib=False,
         weighting=False,
         cuda=False,
+        density=None,
     ):
         """
         Class for computing statistical scores.
@@ -637,10 +645,12 @@ class BayCon:
         self.is_fitted = is_fitted
         self.cuda = cuda
         self.conformal_method = conformal_method
+        self.density = density
         self.sbi_score = sbi_score(
             base_inference,
             is_fitted=is_fitted,
             cuda=self.cuda,
+            density_obj=density,
         )
         self.base_inference = base_inference
         # checking if base model is fitted
@@ -655,6 +665,7 @@ class BayCon:
                 split_calib=split_calib,
                 weighting=weighting,
                 cuda=cuda,
+                density=density,
             )
         elif self.conformal_method == "CDF":
             self.cdf_split = CDFSplit(
@@ -664,6 +675,7 @@ class BayCon:
                 is_fitted=self.is_fitted,
                 split_calib=split_calib,
                 cuda=cuda,
+                density=density,
             )
         elif self.conformal_method == "CDF local":
             self.cdf_split = CDFSplit(
@@ -674,6 +686,7 @@ class BayCon:
                 split_calib=split_calib,
                 cuda=cuda,
                 local_cutoffs=True,
+                density=density,
             )
 
     def fit(self, X, theta, **kwargs):
