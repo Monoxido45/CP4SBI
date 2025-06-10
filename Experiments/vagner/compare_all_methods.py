@@ -7,6 +7,7 @@ from CP4SBI.scores import HPDScore, WALDOScore
 from sbi.utils.user_input_checks import process_prior
 from sbi.utils import MultipleIndependent
 from CP4SBI.utils import naive_method, hdr_method
+from CP4SBI.gmm_task import GaussianMixture
 
 # for benchmarking
 import sbibm
@@ -295,10 +296,14 @@ def compute_coverage(
     num_rounds=10,
     split_calib=False,
 ):
-    # fixing task
-    task = sbibm.get_task(task_name)
-    prior = task.get_prior()
-    simulator = task.get_simulator()
+    if task_name != "gaussian_mixture":
+        task = sbibm.get_task(task_name)
+        simulator = task.get_simulator()
+        prior = task.get_prior()
+    else:
+        task = GaussianMixture(dim=2, prior_bound=4.0)
+        simulator = task.get_simulator()
+        prior = task.get_prior()
 
     # setting seet
     torch.manual_seed(random_seed)
