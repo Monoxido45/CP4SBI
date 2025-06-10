@@ -2,6 +2,7 @@ import numpy as np
 import torch
 from tqdm import tqdm
 from CP4SBI.scores import HPDScore
+from scipy.stats import gaussian_kde
 
 
 # defining naive function
@@ -15,6 +16,7 @@ def naive_method(
     B_waldo=1000,
     grid_step=0.005,
     n_grid=None,
+    kde=False,
 ):
     """
     Naive credible sets based on the posterior distribution.
@@ -42,14 +44,19 @@ def naive_method(
 
     # if score_type is HPD
     if score_type == "HPD":
-        conf_scores = -np.exp(
-            post_estim.log_prob(
-                samples,
-                x=X,
+        if kde:
+            # using kde to compute the density
+            kde_obj = gaussian_kde(samples.cpu().numpy().T, bw_method="scott")
+            conf_scores = -kde_obj.evaluate(samples.cpu().numpy().T)
+        else:
+            conf_scores = -np.exp(
+                post_estim.log_prob(
+                    samples,
+                    x=X,
+                )
+                .cpu()
+                .numpy()
             )
-            .cpu()
-            .numpy()
-        )
     elif score_type == "WALDO":
         conf_scores = np.zeros(B_naive)
 
