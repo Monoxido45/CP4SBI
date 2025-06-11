@@ -322,11 +322,6 @@ def compute_coverage(
     naive_samples=1000,
     sample_with="direct",
 ):
-    # fixing task
-    task = sbibm.get_task(task_name)
-    prior = task.get_prior()
-    simulator = task.get_simulator()
-
     # setting seet
     if not task_name == "gaussian_mixture":
         torch.manual_seed(random_seed)
@@ -540,10 +535,10 @@ def compute_coverage(
     coverage_local_cdf = np.zeros(X_test.shape[0])
     coverage_a_locart = np.zeros(X_test.shape[0])
     coverage_hdr = np.zeros(X_test.shape[0])
-    
+
     # computing conf scores for each X_0 and theta_0
     conf_scores = cdf_conf.cdf_split.sbi_score.compute(X_test, thetas_test)
-    
+
     i = 0
     # computing cutoffs for naive
     naive_cutoff = np.zeros(X_test.shape[0])
@@ -554,33 +549,33 @@ def compute_coverage(
             X_0 = X_0.reshape(1, -1)
         if len(theta_0.shape) == 1:
             theta_0 = theta_0.reshape(1, -1)
-            
+
         # sampling for compute marginal coverage for hdr
         theta_s = post_estim.sample(
-                (1000,),
-                x=X_0.to(device=device),
-                show_progress_bars=False,
-            )
-        
+            (1000,),
+            x=X_0.to(device=device),
+            show_progress_bars=False,
+        )
+
         new_conf_scores = -np.exp(
-                post_estim.log_prob(
-                    theta_s.to(device=device),
-                    x=X_0.to(device=device),
-                )
-                .cpu()
-                .numpy()
+            post_estim.log_prob(
+                theta_s.to(device=device),
+                x=X_0.to(device=device),
             )
-            
+            .cpu()
+            .numpy()
+        )
+
         # recalibrating sample
         _, dens_samples = hdr_obj.recal_sample(
-                y_hat=theta_s.cpu().reshape(
-                    1,
-                    theta_s.shape[0],
-                    theta_s.shape[1],
-                ),
-                f_hat_y_hat=-new_conf_scores.reshape(1, -1),
-            )
-        
+            y_hat=theta_s.cpu().reshape(
+                1,
+                theta_s.shape[0],
+                theta_s.shape[1],
+            ),
+            f_hat_y_hat=-new_conf_scores.reshape(1, -1),
+        )
+
         hdr_conf_scores = -dens_samples[0, :]
         coverage_hdr[i] = np.mean(hdr_conf_scores <= hdr_cutoff[i])
         if score_type == "HPD":
@@ -686,7 +681,7 @@ def compute_coverage_repeated(
         else:
             X = None
             theta = None
-        
+
         if X_test_list is not None:
             X_test = X_test_list["X_test"][j]
             theta_test = X_test_list["theta_test"][j]

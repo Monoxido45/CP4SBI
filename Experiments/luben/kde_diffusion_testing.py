@@ -10,6 +10,11 @@ from sbi.inference import NPSE
 from CP4SBI.baycon import BayCon
 from CP4SBI.scores import KDE_HPDScore
 
+from torch.distributions.multivariate_normal import MultivariateNormal
+from torch.distributions.log_normal import LogNormal
+from sbi.utils.user_input_checks import process_prior
+from sbi.utils import MultipleIndependent
+
 # testing naive
 from CP4SBI.utils import naive_method
 import sbibm
@@ -17,6 +22,7 @@ import pandas as pd
 from tqdm import tqdm
 from copy import deepcopy
 from scipy.stats import gaussian_kde
+import math
 
 # for setting input variables
 import argparse
@@ -48,11 +54,116 @@ prop_calib = 0.2
 B_train = int(B * (1 - prop_calib))
 B_calib = int(B * prop_calib)
 device = "cpu"
-prior_NPE = BoxUniform(
-    low=-1 * torch.ones(2),
-    high=1 * torch.ones(2),
-    device=device,
-)
+
+
+if task_name == "two_moons":
+    prior_NPE = BoxUniform(
+        low=-1 * torch.ones(2),
+        high=1 * torch.ones(2),
+        device=device,
+    )
+elif task_name == "gaussian_linear_uniform":
+    prior_NPE = BoxUniform(
+        low=-1 * torch.ones(10),
+        high=1 * torch.ones(10),
+        device=device,
+    )
+elif task_name == "slcp":
+    prior_NPE = BoxUniform(
+        low=-3 * torch.ones(5),
+        high=3 * torch.ones(5),
+        device=device,
+    )
+elif task_name == "gaussian_linear":
+    prior_params = {
+        "loc": torch.zeros((10,), device=device),
+        "precision_matrix": torch.inverse(0.1 * torch.eye(10, device=device)),
+    }
+    prior_dist = MultivariateNormal(
+        **prior_params,
+        validate_args=False,
+    )
+    prior_NPE, _, _ = process_prior(prior_dist)
+elif task_name == "bernoulli_glm" or "bernoulli_glm_raw":
+    dim_parameters = 10
+    # parameters for the prior distribution
+    M = dim_parameters - 1
+    D = torch.diag(torch.ones(M, device=device)) - torch.diag(
+        torch.ones(M - 1, device=device), -1
+    )
+    F = (
+        torch.matmul(D, D)
+        + torch.diag(1.0 * torch.arange(M, device=device) / (M)) ** 0.5
+    )
+    Binv = torch.zeros(size=(M + 1, M + 1), device=device)
+    Binv[0, 0] = 0.5  # offset
+    Binv[1:, 1:] = torch.matmul(F.T, F)  # filter
+
+    prior_params = {
+        "loc": torch.zeros((M + 1,), device=device),
+        "precision_matrix": Binv,
+    }
+
+    prior_dist = MultivariateNormal(
+        **prior_params,
+        validate_args=False,
+    )
+    prior_NPE, _, _ = process_prior(prior_dist)
+elif task_name == "gaussian_mixture":
+    prior_NPE = BoxUniform(
+        low=-4 * torch.ones(2),
+        high=4 * torch.ones(2),
+        device=device,
+    )
+
+elif task_name == "sir":
+    prior_list = [
+        LogNormal(
+            loc=torch.tensor([math.log(0.4)], device=device),
+            scale=torch.tensor([0.5], device=device),
+            validate_args=False,
+        ),
+        LogNormal(
+            loc=torch.tensor([math.log(0.125)], device=device),
+            scale=torch.tensor([0.2], device=device),
+            validate_args=False,
+        ),
+    ]
+    prior_dist = MultipleIndependent(prior_list, validate_args=False)
+    prior_NPE, _, _ = process_prior(prior_dist)
+elif task_name == "lotka_volterra":
+    mu_p1 = -0.125
+    mu_p2 = -3.0
+    sigma_p = 0.5
+    prior_params = {
+        "loc": torch.tensor([mu_p1, mu_p2, mu_p1, mu_p2], device=device),
+        "scale": torch.tensor([sigma_p, sigma_p, sigma_p, sigma_p], device=device),
+    }
+
+    prior_list = [
+        LogNormal(
+            loc=torch.tensor([mu_p1], device=device),
+            scale=torch.tensor([sigma_p], device=device),
+            validate_args=False,
+        ),
+        LogNormal(
+            loc=torch.tensor([mu_p2], device=device),
+            scale=torch.tensor([sigma_p], device=device),
+            validate_args=False,
+        ),
+        LogNormal(
+            loc=torch.tensor([mu_p1], device=device),
+            scale=torch.tensor([sigma_p], device=device),
+            validate_args=False,
+        ),
+        LogNormal(
+            loc=torch.tensor([mu_p2], device=device),
+            scale=torch.tensor([sigma_p], device=device),
+            validate_args=False,
+        ),
+    ]
+    prior_dist = MultipleIndependent(prior_list, validate_args=False)
+    prior_NPE, _, _ = process_prior(prior_dist)
 
 
 # getting posterior samples
@@ -172,7 +283,6 @@ cdf_conf.calib(
     theta_calib=res,
     using_res=True,
 )
-
 
 # computing cutoff for observed data
 locart_cutoff = locart_conf.predict_cutoff(

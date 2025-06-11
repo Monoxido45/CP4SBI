@@ -3,10 +3,11 @@ import torch
 from sbi.utils import BoxUniform
 from sbi.inference import NPE, NPSE
 from CP4SBI.baycon import BayCon
-from CP4SBI.scores import HPDScore, WALDOScore
+from CP4SBI.scores import HPDScore, WALDOScore, KDE_HPDScore
 from sbi.utils.user_input_checks import process_prior
 from sbi.utils import MultipleIndependent
 from CP4SBI.utils import naive_method, hdr_method
+from scipy.stats import gaussian_kde
 
 # for benchmarking
 import sbibm
@@ -296,11 +297,6 @@ def compute_coverage(
     naive_samples=1000,
     sample_with="direct",
 ):
-    # fixing task
-    task = sbibm.get_task(task_name)
-    prior = task.get_prior()
-    simulator = task.get_simulator()
-
     # setting seet
     if not task_name == "gaussian_mixture":
         torch.manual_seed(random_seed)
@@ -354,8 +350,13 @@ def compute_coverage(
     # checking score type
     if score_type == "HPD":
         score_used = HPDScore
+        kde_use = False
     elif score_type == "WALDO":
         score_used = WALDOScore
+        kde_use = False
+    elif score_type == "KDE":
+        score_used = KDE_HPDScore
+        kde_use = True
 
     print("Computing conformal scores")
     cdf_conf = BayCon(
@@ -485,35 +486,7 @@ def compute_coverage(
     coverage_a_locart = np.zeros(num_obs)
 
     post_estim = deepcopy(bayes_conf.locart.sbi_score.posterior)
-    if base_model != "NPSE":
-        coverage_hdr = np.zeros(num_obs)
-
-        # HDR recalibration
-        print("Fitting HDR recalibration")
-        if score_type == "HPD":
-            hdr_cutoff, hdr_obj = hdr_method(
-                post_estim=inference,
-                X_calib=X_calib,
-                thetas_calib=thetas_calib,
-                n_grid=1000,
-                X_test=X_obs,
-                is_fitted=True,
-                alpha=alpha,
-                score_type=score_type,
-                device=device,
-            )
-        elif score_type == "WALDO":
-            hdr_cutoff, hdr_obj, mean_list, inv_matrix_list = hdr_method(
-                post_estim=inference,
-                X_calib=X_calib,
-                thetas_calib=thetas_calib,
-                n_grid=1000,
-                X_test=X_obs,
-                is_fitted=True,
-                alpha=alpha,
-                score_type=score_type,
-                device=device,
-            )
+    coverage_hdr = np.zeros(num_obs)
 
     # Load the dictionary from the pickle file
     posterior_data_path = (
@@ -523,6 +496,36 @@ def compute_coverage(
         X_dict = pickle.load(f)
 
     X_obs = torch.cat(list(X_dict.keys())).numpy()
+
+    # HDR recalibration
+    print("Fitting HDR recalibration")
+    if score_type == "HPD" or score_type == "KDE":
+        hdr_cutoff, hdr_obj = hdr_method(
+            post_estim=inference,
+            X_calib=X_calib,
+            thetas_calib=thetas_calib,
+            n_grid=1000,
+            X_test=X_obs,
+            is_fitted=True,
+            alpha=alpha,
+            score_type=score_type,
+            device=device,
+            kde=kde_use,
+        )
+    elif score_type == "WALDO":
+        hdr_cutoff, hdr_obj, mean_list, inv_matrix_list = hdr_method(
+            post_estim=inference,
+            X_calib=X_calib,
+            thetas_calib=thetas_calib,
+            n_grid=1000,
+            X_test=X_obs,
+            is_fitted=True,
+            alpha=alpha,
+            score_type=score_type,
+            device=device,
+            kde=kde_use,
+        )
+
     locart_cutoff = bayes_conf.predict_cutoff(X_obs)
     global_cutoff = global_conf.predict_cutoff(X_obs)
     cdf_cutoff = cdf_conf.predict_cutoff(X_obs)
@@ -584,6 +587,53 @@ def compute_coverage(
             )
 
             hdr_conf_scores = -dens_samples[0, :]
+
+        elif score_type == "KDE":
+            # computing naive cutoff
+            if (
+                task_name == "sir"
+                or task_name == "lotka_volterra"
+                or task_name == "gaussian_linear"
+            ):
+                closest_t = naive_method(
+                    post_estim,
+                    X=X_0,
+                    alpha=alpha,
+                    score_type="HPD",
+                    device=device,
+                    n_grid=1000,
+                    B_naive=naive_samples,
+                    use_kde=True,
+                )
+            else:
+                closest_t = naive_method(
+                    post_estim,
+                    X=X_0,
+                    alpha=alpha,
+                    score_type="HPD",
+                    device=device,
+                    B_naive=naive_samples,
+                    use_kde=True,
+                )
+            if len(X_0.shape) == 1:
+                X_0 = X_0.reshape(1, -1)
+
+            sample_generated = (
+                post_estim.sample(
+                    (1000,),
+                    x=X_0,
+                    show_progress_bars=False,
+                )
+                .cpu()
+                .detach()
+                .numpy()
+            )
+
+            #  fitting KDE
+            kde = gaussian_kde(sample_generated.T, bw_method="scott")
+
+            # computing log_prob for only one X
+            conf_scores = -kde(post_samples.T)
 
         elif score_type == "WALDO":
             # computing naive cutoff
@@ -671,35 +721,22 @@ def compute_coverage(
         coverage_cdf[i] = np.mean(conf_scores <= cdf_cutoff[i])
         coverage_local_cdf[i] = np.mean(conf_scores <= local_cdf_cutoff[i])
         coverage_a_locart[i] = np.mean(conf_scores <= alocart_cutoff[i])
-        if base_model != "NPSE":
-            coverage_hdr[i] = np.mean(hdr_conf_scores <= hdr_cutoff[i])
+        coverage_hdr[i] = np.mean(hdr_conf_scores <= hdr_cutoff[i])
 
         i += 1
 
     # Creating a pandas DataFrame with the mean coverage values
-    if base_model != "NPSE":
-        coverage_df = pd.DataFrame(
-            {
-                "LOCART MAD": [np.mean(np.abs(coverage_locart - (1 - alpha)))],
-                "A-LOCART MAD": [np.mean(np.abs(coverage_a_locart - (1 - alpha)))],
-                "Global CP MAD": [np.mean(np.abs(coverage_global - (1 - alpha)))],
-                "Naive MAD": [np.mean(np.abs(coverage_naive - (1 - alpha)))],
-                "CDF MAD": [np.mean(np.abs(coverage_cdf - (1 - alpha)))],
-                "Local CDF MAD": [np.mean(np.abs(coverage_local_cdf - (1 - alpha)))],
-                "HDR MAD": [np.mean(np.abs(coverage_hdr - (1 - alpha)))],
-            }
-        )
-    else:
-        coverage_df = pd.DataFrame(
-            {
-                "LOCART MAD": [np.mean(np.abs(coverage_locart - (1 - alpha)))],
-                "A-LOCART MAD": [np.mean(np.abs(coverage_a_locart - (1 - alpha)))],
-                "Global CP MAD": [np.mean(np.abs(coverage_global - (1 - alpha)))],
-                "Naive MAD": [np.mean(np.abs(coverage_naive - (1 - alpha)))],
-                "CDF MAD": [np.mean(np.abs(coverage_cdf - (1 - alpha)))],
-                "Local CDF MAD": [np.mean(np.abs(coverage_local_cdf - (1 - alpha)))],
-            }
-        )
+    coverage_df = pd.DataFrame(
+        {
+            "LOCART MAD": [np.mean(np.abs(coverage_locart - (1 - alpha)))],
+            "A-LOCART MAD": [np.mean(np.abs(coverage_a_locart - (1 - alpha)))],
+            "Global CP MAD": [np.mean(np.abs(coverage_global - (1 - alpha)))],
+            "Naive MAD": [np.mean(np.abs(coverage_naive - (1 - alpha)))],
+            "CDF MAD": [np.mean(np.abs(coverage_cdf - (1 - alpha)))],
+            "Local CDF MAD": [np.mean(np.abs(coverage_local_cdf - (1 - alpha)))],
+            "HDR MAD": [np.mean(np.abs(coverage_hdr - (1 - alpha)))],
+        }
+    )
     return coverage_df
 
 
