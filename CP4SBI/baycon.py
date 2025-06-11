@@ -292,6 +292,8 @@ class LocartInf(BaseEstimator):
         min_samples_leaf=150,
         random_seed=1250,
         n_samples=1000,
+        res=None,
+        using_res=False,
         **kwargs,
     ):
         """
@@ -332,11 +334,15 @@ class LocartInf(BaseEstimator):
         idxs = np.where(leaves == sel_leaf)[0]
 
         # selecting new data that belongs to the same leaf as X_obs
-        X_t, X_t_w = X_new[idxs, :], X_new_w[idxs, :]
-        theta_t = theta_new[idxs, :]
-        res_t = self.sbi_score.compute(X_t, theta_t)
+        X_t_w = X_new_w[idxs, :]
+        theta_t = theta_new[idxs]
 
-        print(f"Number of selected samples for retraining: {X_t.shape[0]}")
+        if using_res:
+            res_t = res[idxs]
+        else:
+            res_t = self.sbi_score.compute(X_t_w, theta_t)
+
+        print(f"Number of selected samples for retraining: {X_t_w.shape[0]}")
         # training additional CART
         self.new_cart = DecisionTreeRegressor(
             random_state=random_seed, min_samples_leaf=min_samples_leaf
@@ -347,22 +353,24 @@ class LocartInf(BaseEstimator):
         new_leaf = self.new_cart.apply(X_obs_w)[0]
 
         # returning X_new leaves
-        leaves_new = self.cart.apply(X_t_w)
+        leaves_new = self.new_cart.apply(X_t_w)
         new_idxs = np.where(leaves_new == new_leaf)[0]
+        print(new_idxs.shape)
 
         # selecting new data that belongs to the same leaf as X_obs
         current_res = res_t[new_idxs]
-        current_theta = theta_t[new_idxs, :]
-        current_X = X_t[new_idxs, :]
+        current_theta = theta_t[new_idxs]
+
+        # computing prior
+        prior_dens = prior_density_obj(current_theta)
 
         # correcting 1 - alpha
         n = current_res.shape[0]
 
         # computing weights
-        prior_dens = prior_density_obj(current_theta)
-        dens = self.sbi_score.compute(current_X, current_theta)
-        weight_sum = np.sum(prior_dens / dens)
-        w = (prior_dens / dens) / weight_sum
+        weight_sum = np.sum(prior_dens / -current_res)
+        w = (prior_dens / -current_res) / weight_sum
+
         # Compute weighted empirical CDF quantile
         sorted_indices = np.argsort(current_res)
         sorted_res = current_res[sorted_indices]
