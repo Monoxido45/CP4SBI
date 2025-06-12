@@ -163,7 +163,7 @@ if task_name != "gaussian_mixture":
 else:
     from CP4SBI.gmm_task import GaussianMixture
 
-    task = GaussianMixture(dim=2, prior_bound=4.0)
+    task = GaussianMixture(dim=2, prior_bound=3.0)
     simulator = task.get_simulator()
     prior = task.get_prior()
 
@@ -225,8 +225,8 @@ elif task_name == "bernoulli_glm" or "bernoulli_glm_raw":
     prior_NPE, _, _ = process_prior(prior_dist)
 elif task_name == "gaussian_mixture":
     prior_NPE = BoxUniform(
-        low=-4 * torch.ones(2),
-        high=4 * torch.ones(2),
+        low=-3 * torch.ones(2),
+        high=3 * torch.ones(2),
         device=device,
     )
 
@@ -508,7 +508,7 @@ def compute_coverage(
             X_test=X_obs,
             is_fitted=True,
             alpha=alpha,
-            score_type=score_type,
+            score_type="HPD",
             device=device,
             kde=kde_use,
         )
@@ -603,7 +603,7 @@ def compute_coverage(
                     device=device,
                     n_grid=1000,
                     B_naive=naive_samples,
-                    use_kde=True,
+                    kde=True,
                 )
             else:
                 closest_t = naive_method(
@@ -613,7 +613,7 @@ def compute_coverage(
                     score_type="HPD",
                     device=device,
                     B_naive=naive_samples,
-                    use_kde=True,
+                    kde=True,
                 )
             if len(X_0.shape) == 1:
                 X_0 = X_0.reshape(1, -1)
@@ -634,6 +634,19 @@ def compute_coverage(
 
             # computing log_prob for only one X
             conf_scores = -kde(post_samples.T)
+
+            # computing scores for HDR
+
+            _, dens_samples = hdr_obj.recal_sample(
+                y_hat=post_samples.reshape(
+                    1,
+                    post_samples.shape[0],
+                    post_samples.shape[1],
+                ),
+                f_hat_y_hat=-conf_scores.reshape(1, -1),
+            )
+
+            hdr_conf_scores = -dens_samples[0, :]
 
         elif score_type == "WALDO":
             # computing naive cutoff
