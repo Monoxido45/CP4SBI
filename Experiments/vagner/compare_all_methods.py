@@ -1,7 +1,7 @@
 # for posterior estimation and calibration
 import torch
 from sbi.utils import BoxUniform
-from sbi.inference import NPE, simulate_for_sbi
+from sbi.inference import NPE, simulate_for_sbi, SNPE_C
 from CP4SBI.baycon import BayCon
 from CP4SBI.scores import HPDScore, WALDOScore
 from sbi.utils.user_input_checks import process_prior
@@ -18,7 +18,6 @@ from torch.distributions.log_normal import LogNormal
 
 # for plotting and broadcasting
 from tqdm import tqdm
-import matplotlib.pyplot as plt
 import numpy as np
 import math
 
@@ -146,7 +145,7 @@ if task_name != "gaussian_mixture":
 else:
     from CP4SBI.gmm_task import GaussianMixture
 
-    task = GaussianMixture(dim=2, prior_bound=4.0)
+    task = GaussianMixture(dim=2, prior_bound=3.0)
     simulator = task.get_simulator()
     prior = task.get_prior()
 
@@ -208,8 +207,8 @@ elif task_name == "bernoulli_glm" or "bernoulli_glm_raw":
     prior_NPE, _, _ = process_prior(prior_dist)
 elif task_name == "gaussian_mixture":
     prior_NPE = BoxUniform(
-        low=-4 * torch.ones(2),
-        high=4 * torch.ones(2),
+        low=-3 * torch.ones(2),
+        high=3 * torch.ones(2),
         device=device,
     )
 
@@ -263,21 +262,6 @@ elif task_name == "lotka_volterra":
     prior_NPE, _, _ = process_prior(prior_dist)
 
 
-# unused simulators
-# elif task.name == "bernoulli_glm":
-# setting parameters for prior distribution
-#    M = task.dim_parameters - 1
-#    D = torch.diag(torch.ones(M)) - torch.diag(torch.ones(M - 1), -1)
-#    F = torch.matmul(D, D) + torch.diag(1.0 * torch.arange(M) / (M)) ** 0.5
-#    Binv = torch.zeros(size=(M + 1, M + 1))
-#    Binv[0, 0] = 0.5  # offset
-#    Binv[1:, 1:] = torch.matmul(F.T, F)
-# setting up prior distribution using torch
-#    prior_params = {"loc": torch.zeros((M + 1,)), "precision_matrix": Binv}
-#    prior_dist = MultivariateNormal(**prior_params, validate_args=False)
-#    prior_NPE, _, _ = process_prior(prior_dist)
-
-
 def compute_coverage(
     prior_NPE,
     score_type,
@@ -296,15 +280,6 @@ def compute_coverage(
     num_rounds=10,
     split_calib=False,
 ):
-    if task_name != "gaussian_mixture":
-        task = sbibm.get_task(task_name)
-        simulator = task.get_simulator()
-        prior = task.get_prior()
-    else:
-        task = GaussianMixture(dim=2, prior_bound=4.0)
-        simulator = task.get_simulator()
-        prior = task.get_prior()
-
     # setting seet
     torch.manual_seed(random_seed)
     torch.cuda.manual_seed(random_seed)
@@ -375,7 +350,7 @@ def compute_coverage(
         post_samples = X_dict[X_0]
 
         # dummy SNPE inference object
-        base_inference = NPE(prior=prior_NPE, device=device)
+        base_inference = SNPE_C(prior=prior_NPE, device=device)
 
         if sequential:
             print("Fitting SNPE in sequential mode")
@@ -387,7 +362,7 @@ def compute_coverage(
 
             for j in range(num_rounds):
                 theta, x = simulate_for_sbi(
-                    cpu_simulator, proposal, num_simulations=2000
+                    cpu_simulator, proposal, num_simulations=500
                 )
                 theta, x = theta.to(device), x.to(device)
                 density_estimator = base_inference.append_simulations(
@@ -402,6 +377,7 @@ def compute_coverage(
                 posteriors.append(posterior)
                 proposal = posterior.set_default_x(x_o)
 
+        post_estim = posteriors[-1]
         # initializing inference object by the last density estimator
         # CDF split
         cdf_conf = BayCon(
@@ -546,9 +522,6 @@ def compute_coverage(
         local_cdf_cutoff = local_cdf_conf.predict_cutoff(X_0)
         alocart_cutoff = w_bayes_conf.predict_cutoff(X_0)
 
-        # computing naive cutoff
-        post_estim = deepcopy(posterior)
-
         if score_type == "HPD":
             # computing naive cutoff
             if (
@@ -645,13 +618,9 @@ def compute_coverage(
         print(f"A-LOCART Coverage for observation {i}: {coverage_a_locart[i]}")
         print(f"Naive Coverage for observation {i}: {coverage_naive[i]}")
         # Printing CDF and Local CDF coverage for the current observation
-        print(f"CDF Coverage for observation {i}: {np.mean(conf_scores <= cdf_cutoff)}")
-        print(
-            f"Local CDF Coverage for observation {i}: {np.mean(conf_scores <= local_cdf_cutoff)}"
-        )
-        print(
-            f"Global Coverage for observation {i}: {np.mean(conf_scores <= global_cutoff)}"
-        )
+        print(f"CDF Coverage for observation {i}: {coverage_cdf[i]}")
+        print(f"Local CDF Coverage for observation {i}: {coverage_local_cdf[i]}")
+        print(f"Global Coverage for observation {i}: {coverage_global[i]}")
 
         i += 1
 

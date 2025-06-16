@@ -18,7 +18,6 @@ from torch.distributions.log_normal import LogNormal
 
 # for plotting and broadcasting
 from tqdm import tqdm
-import matplotlib.pyplot as plt
 import numpy as np
 import math
 
@@ -163,7 +162,7 @@ if task_name != "gaussian_mixture":
 else:
     from CP4SBI.gmm_task import GaussianMixture
 
-    task = GaussianMixture(dim=2, prior_bound=3.0)
+    task = GaussianMixture(dim=2, prior_bound=5.0)
     simulator = task.get_simulator()
     prior = task.get_prior()
 
@@ -225,11 +224,10 @@ elif task_name == "bernoulli_glm" or "bernoulli_glm_raw":
     prior_NPE, _, _ = process_prior(prior_dist)
 elif task_name == "gaussian_mixture":
     prior_NPE = BoxUniform(
-        low=-3 * torch.ones(2),
-        high=3 * torch.ones(2),
+        low=-5 * torch.ones(2),
+        high=5 * torch.ones(2),
         device=device,
     )
-
 elif task_name == "sir":
     prior_list = [
         LogNormal(
