@@ -13,6 +13,9 @@ from torch.distributions.multivariate_normal import MultivariateNormal
 from torch.distributions.log_normal import LogNormal
 import numpy as np
 
+import os
+import pickle
+
 num_rounds = 10
 alpha = 0.1
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -21,6 +24,30 @@ task_name = "gaussian_linear"
 naive_samples = 1000
 B_train = 100
 B_calib = 100
+X_str =  "True"
+num_obs = 200
+B = 400
+
+original_path = os.getcwd()
+if X_str:
+    # Load the X_list pickle file from the X_data folder
+    x_data_path = os.path.join(
+        original_path, "Results/X_data", f"{task_name}_X_samples_{B}.pkl"
+    )
+    with open(x_data_path, "rb") as f:
+        X_list = pickle.load(f)
+
+    # Load the X_list pickle file from the X_data folder
+    theta_data_path = os.path.join(
+        original_path, "Results/X_data", f"{task_name}_theta_samples_{B}.pkl"
+    )
+    with open(theta_data_path, "rb") as f:
+        theta_list = pickle.load(f)
+
+    X_dict = {"X": X_list, "theta": theta_list}
+else:
+    X_dict = None
+
 
 torch.manual_seed(42)
 if device == "cuda":
