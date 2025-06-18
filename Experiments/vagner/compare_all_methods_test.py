@@ -1,7 +1,8 @@
 # for posterior estimation and calibration
 import torch
 from sbi.utils import BoxUniform
-from sbi.inference import NPE, simulate_for_sbi, SNPE_C
+from sbi.analysis import pairplot
+from sbi.inference import NPE, simulate_for_sbi
 from CP4SBI.baycon import BayCon
 from CP4SBI.scores import HPDScore, WALDOScore
 from sbi.utils.user_input_checks import process_prior
@@ -18,6 +19,7 @@ from torch.distributions.log_normal import LogNormal
 # for plotting and broadcasting
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+import seaborn as sns
 import numpy as np
 import math
 
@@ -294,6 +296,7 @@ def compute_coverage(
     sequential=False,
     num_rounds=10,
     split_calib=False,
+    plot_theta_comparison=0,
 ):
     # fixing task
     task = sbibm.get_task(task_name)
@@ -309,9 +312,9 @@ def compute_coverage(
     B_train = int(B * (1 - prop_calib))
     B_calib = int(B * prop_calib)
 
-    def device_simulator(parameters, device="cpu"): 
+    def cpu_simulator(parameters):
         with torch.no_grad():
-            return simulator(parameters.to(device))
+            return simulator(parameters.cpu())
 
     if X is None and theta is None:
         # training samples
@@ -362,24 +365,25 @@ def compute_coverage(
         X_dict = {k: X_dict[k] for k in list(X_dict.keys())[:num_obs]}
 
     X_obs = torch.cat(list(X_dict.keys())).numpy()
+        
+    base_inference_default = NPE(prior=prior_NPE, device=device)
+    base_inference_default.append_simulations(theta_train, X_train).train()  
 
     i = 0
     dict_keys = list(X_dict.keys())
-
-    # Testing
-    base_inference_default = SNPE_C(prior=prior_NPE, device=device)
-    base_inference_default.append_simulations(theta_train, X_train).train()  
+    idx_plot = torch.randperm(theta_train.shape[0])[:plot_theta_comparison]
 
     # evaluating cutoff for each observation
     for X_0 in tqdm(dict_keys, desc="Computing coverage across observations"):
         post_samples = X_dict[X_0]
 
         # dummy SNPE inference object
-        base_inference = base_inference_default    
+        # base_inference = NPE(prior=prior_NPE, device=device)
+        base_inference = base_inference_default 
 
         if sequential:
             print("Fitting SNPE in sequential mode")
-            x_o = X_0.to(device)
+            x_o = X_0
 
             # Fitting SNPE
             posteriors = []
@@ -387,7 +391,7 @@ def compute_coverage(
 
             for j in range(num_rounds):
                 theta, x = simulate_for_sbi(
-                    device_simulator, proposal, num_simulations=2000
+                    cpu_simulator, proposal, num_simulations=2000
                 )
                 theta, x = theta.to(device), x.to(device)
                 density_estimator = base_inference.append_simulations(
@@ -401,6 +405,15 @@ def compute_coverage(
                 posterior = base_inference.build_posterior(density_estimator)
                 posteriors.append(posterior)
                 proposal = posterior.set_default_x(x_o)
+
+                # Testing
+                posterior_samples = posterior.sample((1000,), x=x_o.to(device))
+
+                # plot posterior samples
+                fig, ax = pairplot(
+                posterior_samples.cpu(),  figsize=(5, 5)
+                )
+                plt.show()
 
         # initializing inference object by the last density estimator
         # CDF split
@@ -558,7 +571,7 @@ def compute_coverage(
                 or task_name == "gaussian_mixture"
             ):
                 closest_t = naive_method(
-                    post_estim,
+                    post_estim, 
                     X=X_0,
                     alpha=alpha,
                     score_type=score_type,
@@ -739,6 +752,7 @@ def compute_coverage_repeated(
             naive_samples=naive_samples,
             sequential=True,
             num_rounds=num_rounds,
+            plot_theta_comparison=1,
         )
         coverage_results.append(coverage_df)
 
@@ -765,7 +779,7 @@ all_coverage_df = compute_coverage_repeated(
     naive_samples=1000,
     n_rep=n_rep,
     sequential=True,
-    num_rounds=10,
+    num_rounds=5,
 )
 
 # Create the "MAE_results" folder if it doesn't exist
