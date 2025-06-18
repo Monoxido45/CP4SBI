@@ -90,7 +90,7 @@ class LocartInf(BaseEstimator):
         n_samples=1000,
         min_samples_leaf=100,
         using_res=False,
-        **kwargs
+        **kwargs,
     ):
         """
         Calibrate conformity score using CART
@@ -282,6 +282,108 @@ class LocartInf(BaseEstimator):
             else:
                 plt.title(title)
             plt.show()
+
+    def retrain_locart(
+        self,
+        X_obs,
+        X_new,
+        theta_new,
+        prior_density_obj,
+        min_samples_leaf=150,
+        random_seed=1250,
+        n_samples=1000,
+        res=None,
+        using_res=False,
+        **kwargs,
+    ):
+        """
+        Retrain LOCART and thin the partitioning scheme and cutoffs for X_obs
+        --------------------------------------------------------
+        Input: (i)    X_obs: Observed numpy feature matrix
+               (ii)   X_new: New numpy feature matrix
+               (iii)  theta_new: New parameter array
+        """
+        # returning the leaf from X_obs
+        if isinstance(X_obs, torch.Tensor):
+            X_obs = X_obs.numpy()
+        if isinstance(theta_new, torch.Tensor):
+            theta_new = theta_new.numpy()
+        if isinstance(X_new, torch.Tensor):
+            X_new = X_new.numpy()
+
+        # Check if X_obs does not have shape 2
+        if X_obs.ndim != 2:
+            X_obs = X_obs.reshape(1, -1)
+
+        if self.weighting:
+            # generating n_samples samples from the posterior
+            w = self.compute_variance(X_new, n_samples=n_samples)
+            X_new_w = np.concatenate((X_new, w.reshape(-1, 1)), axis=1)
+
+            # making the same for X_obs
+            w_obs = self.compute_variance(X_obs, n_samples=n_samples)
+            X_obs_w = np.concatenate((X_obs, w_obs.reshape(-1, 1)), axis=1)
+        else:
+            X_new_w = X_new
+            X_obs_w = X_obs
+
+        sel_leaf = self.cart.apply(X_obs_w)[0]
+
+        # returning X_new leaves
+        leaves = self.cart.apply(X_new_w)
+        idxs = np.where(leaves == sel_leaf)[0]
+
+        # selecting new data that belongs to the same leaf as X_obs
+        X_t_w = X_new_w[idxs, :]
+        theta_t = theta_new[idxs]
+
+        if using_res:
+            res_t = res[idxs]
+        else:
+            res_t = self.sbi_score.compute(X_t_w, theta_t)
+
+        print(f"Number of selected samples for retraining: {X_t_w.shape[0]}")
+        # training additional CART
+        self.new_cart = DecisionTreeRegressor(
+            random_state=random_seed, min_samples_leaf=min_samples_leaf
+        ).set_params(**kwargs)
+        self.new_cart.fit(X_t_w, res_t)
+
+        # obtaining cutoff for X_obs specific leaf
+        new_leaf = self.new_cart.apply(X_obs_w)[0]
+
+        # returning X_new leaves
+        leaves_new = self.new_cart.apply(X_t_w)
+        new_idxs = np.where(leaves_new == new_leaf)[0]
+        print(new_idxs.shape)
+
+        # selecting new data that belongs to the same leaf as X_obs
+        current_res = res_t[new_idxs]
+        current_theta = theta_t[new_idxs]
+
+        # computing prior
+        prior_dens = prior_density_obj(current_theta)
+
+        # correcting 1 - alpha
+        n = current_res.shape[0]
+
+        # computing weights
+        weight_sum = np.sum(prior_dens / -current_res)
+        w = (prior_dens / -current_res) / weight_sum
+
+        # Compute weighted empirical CDF quantile
+        sorted_indices = np.argsort(current_res)
+        sorted_res = current_res[sorted_indices]
+        sorted_weights = w[sorted_indices]
+
+        cumulative_weights = np.cumsum(sorted_weights)
+        cumulative_weights /= cumulative_weights[-1]  # Normalize to [0, 1]
+
+        cutoff = np.interp(
+            np.ceil((n + 1) * (1 - self.alpha)) / n, cumulative_weights, sorted_res
+        )
+
+        return cutoff
 
     def predict_cutoff(self, X, n_samples=1000):
         """
@@ -818,3 +920,46 @@ class BayCon:
             cutoffs = self.cdf_split.predict_cutoff(X_test)
 
         return cutoffs
+
+    def retrain_obs(
+        self,
+        X_obs,
+        X_new,
+        theta_new,
+        prior_density_obj,
+        min_samples_leaf=150,
+        random_seed=1250,
+        **kwargs,
+    ):
+        """
+        Retrain the conformal method using observed data and new data.
+        Args:
+            X_obs (numpy.ndarray): Observed feature matrix.
+            X_new (numpy.ndarray): New feature matrix.
+            theta_new (numpy.ndarray): New parameter array.
+            prior_density_obj: Prior density object for computing weights.
+            min_samples_leaf (int): Minimum number of samples per leaf for the decision tree.
+            random_seed (int): Random seed for reproducibility.
+            **kwargs: Additional arguments for the retraining process.
+        Returns:
+            float: Cutoff for the observed data.
+        """
+        if self.conformal_method == "local":
+            if self.locart is None:
+                raise RuntimeError(
+                    "Conformal method must be calibrated before retraining"
+                )
+            cutoff = self.locart.retrain_locart(
+                X_obs,
+                X_new,
+                theta_new,
+                prior_density_obj,
+                min_samples_leaf=min_samples_leaf,
+                random_seed=random_seed,
+                **kwargs,
+            )
+            return cutoff
+        else:
+            raise RuntimeError(
+                "Retraining is only supported for the 'local' conformal method"
+            )

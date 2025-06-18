@@ -1,7 +1,8 @@
 import numpy as np
 import torch
 from tqdm import tqdm
-from CP4SBI.scores import HPDScore
+from CP4SBI.scores import HPDScore, KDE_HPDScore
+from scipy.stats import gaussian_kde
 
 
 # defining naive function
@@ -15,6 +16,7 @@ def naive_method(
     B_waldo=1000,
     grid_step=0.005,
     n_grid=None,
+    kde=False,
 ):
     """
     Naive credible sets based on the posterior distribution.
@@ -42,14 +44,19 @@ def naive_method(
 
     # if score_type is HPD
     if score_type == "HPD":
-        conf_scores = -np.exp(
-            post_estim.log_prob(
-                samples,
-                x=X,
+        if kde:
+            # using kde to compute the density
+            kde_obj = gaussian_kde(samples.cpu().numpy().T, bw_method="scott")
+            conf_scores = -kde_obj.evaluate(samples.cpu().numpy().T)
+        else:
+            conf_scores = -np.exp(
+                post_estim.log_prob(
+                    samples,
+                    x=X,
+                )
+                .cpu()
+                .numpy()
             )
-            .cpu()
-            .numpy()
-        )
     elif score_type == "WALDO":
         conf_scores = np.zeros(B_naive)
 
@@ -502,15 +509,25 @@ def hdr_method(
     n_grid=700,
     is_fitted=True,
     post_dens=None,
+    kde=False,
 ):
-    # using HPDscore to compute posterior probabilities
-    bayes_score = HPDScore(
-        post_estim,
-        is_fitted=is_fitted,
-        cuda=device == "cuda",
-        density_obj=post_dens,
-    )
-    bayes_score.fit(X_train, theta_train)
+    if kde:
+        bayes_score = KDE_HPDScore(
+            post_estim,
+            is_fitted=is_fitted,
+            cuda=device == "cuda",
+            density_obj=post_dens,
+        )
+        bayes_score.fit(X_train, theta_train)
+    else:
+        # using HPDscore to compute posterior probabilities
+        bayes_score = HPDScore(
+            post_estim,
+            is_fitted=is_fitted,
+            cuda=device == "cuda",
+            density_obj=post_dens,
+        )
+        bayes_score.fit(X_train, theta_train)
 
     # first, computing the probability of each observed samples
     prob_array_calib = -bayes_score.compute(X_calib, thetas_calib)

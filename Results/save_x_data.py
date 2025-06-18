@@ -26,6 +26,12 @@ parser.add_argument(
     default=10000,
     type=int,
 )
+parser.add_argument(
+    "--testing",
+    "-test",
+    help="boolean for generate testing samples, if True, it will generate testing samples",
+    default="False",
+)
 
 
 if __name__ == "__main__":
@@ -37,6 +43,7 @@ task_name = args.task
 seed = args.seed
 n_replica = args.n_replicates
 B = args.B
+testing = args.testing == "True"
 
 # Set the random seed for reproducibility
 torch.manual_seed(seed)
@@ -52,10 +59,9 @@ if task_name != "gaussian_mixture":
 else:
     from CP4SBI.gmm_task import GaussianMixture
 
-    task = GaussianMixture(dim=2, prior_bound=4.0)
+    task = GaussianMixture(dim=2, prior_bound=3.0)
     simulator = task.get_simulator()
     prior = task.get_prior()
-
 
 # Generate the observed data and saving it in a list
 X_obs_list = []
@@ -97,11 +103,20 @@ for j in tqdm(range(i, n_replica)):
         pickle.dump(theta_obs_list, checkpoint_file)
 
 # Saving samples
-with open(os.path.join(save_dir, f"{task_name}_X_samples_{B}.pkl"), "wb") as f:
-    pickle.dump(X_obs_list, f)
+if testing:
+    with open(os.path.join(save_dir, f"{task_name}_X_test_samples_{B}.pkl"), "wb") as f:
+        pickle.dump(X_obs_list, f)
 
-with open(os.path.join(save_dir, f"{task_name}_theta_samples_{B}.pkl"), "wb") as f:
-    pickle.dump(theta_obs_list, f)
+    with open(
+        os.path.join(save_dir, f"{task_name}_theta_test_samples_{B}.pkl"), "wb"
+    ) as f:
+        pickle.dump(theta_obs_list, f)
+else:
+    with open(os.path.join(save_dir, f"{task_name}_X_samples_{B}.pkl"), "wb") as f:
+        pickle.dump(X_obs_list, f)
+
+    with open(os.path.join(save_dir, f"{task_name}_theta_samples_{B}.pkl"), "wb") as f:
+        pickle.dump(theta_obs_list, f)
 
 # removing checkpoint file
 if os.path.exists(checkpoint_path):

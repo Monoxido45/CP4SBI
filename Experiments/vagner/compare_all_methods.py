@@ -2,11 +2,13 @@
 import torch
 from sbi.utils import BoxUniform
 from sbi.inference import NPE, simulate_for_sbi, SNPE_C
+from sbi.inference import NPE, simulate_for_sbi, SNPE_C
 from CP4SBI.baycon import BayCon
 from CP4SBI.scores import HPDScore, WALDOScore
 from sbi.utils.user_input_checks import process_prior
 from sbi.utils import MultipleIndependent
 from CP4SBI.utils import naive_method, hdr_method
+from CP4SBI.gmm_task import GaussianMixture
 
 # for benchmarking
 import sbibm
@@ -17,7 +19,6 @@ from torch.distributions.log_normal import LogNormal
 
 # for plotting and broadcasting
 from tqdm import tqdm
-import matplotlib.pyplot as plt
 import numpy as np
 import math
 
@@ -130,9 +131,9 @@ if X_str:
     with open(theta_data_path, "rb") as f:
         theta_list = pickle.load(f)
 
-    X_dict = {"X": X_list, "theta": theta_list}
+    X_dict_used = {"X": X_list, "theta": theta_list}
 else:
-    X_dict = None
+    X_dict_used = None
 
 # Set the random seed for reproducibility
 alpha = 0.1
@@ -145,7 +146,7 @@ if task_name != "gaussian_mixture":
 else:
     from CP4SBI.gmm_task import GaussianMixture
 
-    task = GaussianMixture(dim=2, prior_bound=4.0)
+    task = GaussianMixture(dim=2, prior_bound=3.0)
     simulator = task.get_simulator()
     prior = task.get_prior()
 
@@ -207,8 +208,8 @@ elif task_name == "bernoulli_glm" or "bernoulli_glm_raw":
     prior_NPE, _, _ = process_prior(prior_dist)
 elif task_name == "gaussian_mixture":
     prior_NPE = BoxUniform(
-        low=-4 * torch.ones(2),
-        high=4 * torch.ones(2),
+        low=-3 * torch.ones(2),
+        high=3 * torch.ones(2),
         device=device,
     )
 
@@ -262,21 +263,6 @@ elif task_name == "lotka_volterra":
     prior_NPE, _, _ = process_prior(prior_dist)
 
 
-# unused simulators
-# elif task.name == "bernoulli_glm":
-# setting parameters for prior distribution
-#    M = task.dim_parameters - 1
-#    D = torch.diag(torch.ones(M)) - torch.diag(torch.ones(M - 1), -1)
-#    F = torch.matmul(D, D) + torch.diag(1.0 * torch.arange(M) / (M)) ** 0.5
-#    Binv = torch.zeros(size=(M + 1, M + 1))
-#    Binv[0, 0] = 0.5  # offset
-#    Binv[1:, 1:] = torch.matmul(F.T, F)
-# setting up prior distribution using torch
-#    prior_params = {"loc": torch.zeros((M + 1,)), "precision_matrix": Binv}
-#    prior_dist = MultivariateNormal(**prior_params, validate_args=False)
-#    prior_NPE, _, _ = process_prior(prior_dist)
-
-
 def compute_coverage(
     prior_NPE,
     score_type,
@@ -295,11 +281,6 @@ def compute_coverage(
     num_rounds=10,
     split_calib=False,
 ):
-    # fixing task
-    task = sbibm.get_task(task_name)
-    prior = task.get_prior()
-    simulator = task.get_simulator()
-
     # setting seet
     torch.manual_seed(random_seed)
     torch.cuda.manual_seed(random_seed)
@@ -321,7 +302,6 @@ def compute_coverage(
         # training conformal methods
         thetas_calib = prior(num_samples=B_calib)
         X_calib = simulator(thetas_calib)
-
     else:
         # splitting X
         indices = torch.randperm(X.shape[0])
@@ -358,11 +338,6 @@ def compute_coverage(
     with open(posterior_data_path, "rb") as f:
         X_dict = pickle.load(f)
 
-    if num_obs < len(X_dict.keys()):
-        X_dict = {k: X_dict[k] for k in list(X_dict.keys())[:num_obs]}
-
-    X_obs = torch.cat(list(X_dict.keys())).numpy()
-
     i = 0
     dict_keys = list(X_dict.keys())
 
@@ -371,8 +346,10 @@ def compute_coverage(
     base_inference_default.append_simulations(theta_train, X_train).train()  
 
     # evaluating cutoff for each observation
-    for X_0 in tqdm(dict_keys, desc="Computing coverage across observations"):
+    for k in tqdm(range(num_obs), desc="Computing coverage across observations"):
+        X_0 = dict_keys[k]
         post_samples = X_dict[X_0]
+        x_o = X_0
 
         # dummy SNPE inference object
         base_inference = base_inference_default    
@@ -390,18 +367,16 @@ def compute_coverage(
                     device_simulator, proposal, num_simulations=2000
                 )
                 theta, x = theta.to(device), x.to(device)
+
                 density_estimator = base_inference.append_simulations(
                     theta, x, proposal=proposal
-                ).train(force_first_round_loss=True)
-
-                # using warm start for the first round
-                # if j == 0:
-                # density_estimator.load_state_dict(trained_net.state_dict())
+                ).train()
 
                 posterior = base_inference.build_posterior(density_estimator)
                 posteriors.append(posterior)
                 proposal = posterior.set_default_x(x_o)
 
+        post_estim = posteriors[-1]
         # initializing inference object by the last density estimator
         # CDF split
         cdf_conf = BayCon(
@@ -546,9 +521,6 @@ def compute_coverage(
         local_cdf_cutoff = local_cdf_conf.predict_cutoff(X_0)
         alocart_cutoff = w_bayes_conf.predict_cutoff(X_0)
 
-        # computing naive cutoff
-        post_estim = deepcopy(posterior)
-
         if score_type == "HPD":
             # computing naive cutoff
             if (
@@ -645,13 +617,9 @@ def compute_coverage(
         print(f"A-LOCART Coverage for observation {i}: {coverage_a_locart[i]}")
         print(f"Naive Coverage for observation {i}: {coverage_naive[i]}")
         # Printing CDF and Local CDF coverage for the current observation
-        print(f"CDF Coverage for observation {i}: {np.mean(conf_scores <= cdf_cutoff)}")
-        print(
-            f"Local CDF Coverage for observation {i}: {np.mean(conf_scores <= local_cdf_cutoff)}"
-        )
-        print(
-            f"Global Coverage for observation {i}: {np.mean(conf_scores <= global_cutoff)}"
-        )
+        print(f"CDF Coverage for observation {i}: {coverage_cdf[i]}")
+        print(f"Local CDF Coverage for observation {i}: {coverage_local_cdf[i]}")
+        print(f"Global Coverage for observation {i}: {coverage_global[i]}")
 
         i += 1
 
@@ -753,7 +721,7 @@ def compute_coverage_repeated(
 all_coverage_df = compute_coverage_repeated(
     score_type=score_type,
     prior_NPE=prior_NPE,
-    X_list=X_dict,
+    X_list=X_dict_used,
     B=B,
     prop_calib=p_calib,
     alpha=alpha,

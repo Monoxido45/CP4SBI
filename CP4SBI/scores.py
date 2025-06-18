@@ -122,6 +122,7 @@ class KDE_HPDScore(sbi_Scores):
 
             # computing log_prob for only one X
             prob_array = kde(thetas_calib.numpy().T)
+
         # computing posterior density for theta
         return -(prob_array)
 

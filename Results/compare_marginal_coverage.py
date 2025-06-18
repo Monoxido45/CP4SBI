@@ -322,11 +322,6 @@ def compute_coverage(
     naive_samples=1000,
     sample_with="direct",
 ):
-    # fixing task
-    task = sbibm.get_task(task_name)
-    prior = task.get_prior()
-    simulator = task.get_simulator()
-
     # setting seet
     if not task_name == "gaussian_mixture":
         torch.manual_seed(random_seed)
@@ -362,8 +357,7 @@ def compute_coverage(
     if X_test is None and theta_test is None:
         # training conformal methods
         thetas_test = prior(num_samples=B_test)
-        X_test = simulator(thetas_calib)
-
+        X_test = simulator(thetas_test)
     else:
         thetas_test = theta_test
         X_test = X_test
@@ -542,12 +536,48 @@ def compute_coverage(
     coverage_a_locart = np.zeros(X_test.shape[0])
     coverage_hdr = np.zeros(X_test.shape[0])
 
+    # computing conf scores for each X_0 and theta_0
+    conf_scores = cdf_conf.cdf_split.sbi_score.compute(X_test, thetas_test)
+
     i = 0
-    # evaluating cutoff for each observation
+    # computing cutoffs for naive
+    naive_cutoff = np.zeros(X_test.shape[0])
     for X_0, theta_0 in tqdm(
         zip(X_test, thetas_test), desc="Computing naive cutoff for each test set"
     ):
+        if len(X_0.shape) == 1:
+            X_0 = X_0.reshape(1, -1)
+        if len(theta_0.shape) == 1:
+            theta_0 = theta_0.reshape(1, -1)
 
+        # sampling for compute marginal coverage for hdr
+        theta_s = post_estim.sample(
+            (1000,),
+            x=X_0.to(device=device),
+            show_progress_bars=False,
+        )
+
+        new_conf_scores = -np.exp(
+            post_estim.log_prob(
+                theta_s.to(device=device),
+                x=X_0.to(device=device),
+            )
+            .cpu()
+            .numpy()
+        )
+
+        # recalibrating sample
+        _, dens_samples = hdr_obj.recal_sample(
+            y_hat=theta_s.cpu().reshape(
+                1,
+                theta_s.shape[0],
+                theta_s.shape[1],
+            ),
+            f_hat_y_hat=-new_conf_scores.reshape(1, -1),
+        )
+
+        hdr_conf_scores = -dens_samples[0, :]
+        coverage_hdr[i] = np.mean(hdr_conf_scores <= hdr_cutoff[i])
         if score_type == "HPD":
             # computing naive cutoff
             if (
@@ -573,42 +603,15 @@ def compute_coverage(
                     device=device,
                     B_naive=naive_samples,
                 )
-            if len(X_0.shape) == 1:
-                X_0 = X_0.reshape(1, -1)
-            if len(theta_0.shape) == 1:
-                theta_0 = theta_0.reshape(1, -1)
-
-            # computing scores for naive, locart, global, cdf, local_cdf, and alocart
-            conf_score = -np.exp(
-                post_estim.log_prob(
-                    theta_0.to(device=device),
-                    x=X_0.to(device=device),
-                )
-                .cpu()
-                .numpy()
-            )
-
-            # computing score for HDR
-            _, dens_samples = hdr_obj.recal_sample(
-                y_hat=theta_0.reshape(
-                    1,
-                    theta_0.shape[0],
-                    theta_0.shape[1],
-                ),
-                f_hat_y_hat=-conf_score.reshape(1, -1),
-            )
-
-            hdr_conf_score = -dens_samples[0, :]
+            naive_cutoff[i] = closest_t
 
         # computing coverage
-        coverage_locart[i] = conf_score <= locart_cutoff[i]
-        coverage_global[i] = conf_score <= global_cutoff[i]
-        coverage_naive[i] = conf_score <= closest_t
-        coverage_cdf[i] = conf_score <= cdf_cutoff[i]
-        coverage_local_cdf[i] = conf_score <= local_cdf_cutoff[i]
-        coverage_a_locart[i] = conf_score <= alocart_cutoff[i]
-        coverage_hdr[i] = hdr_conf_score <= hdr_cutoff[i]
-
+        coverage_locart[i] = (conf_scores[i] <= locart_cutoff[i]) + 0
+        coverage_global[i] = (conf_scores[i] <= global_cutoff[i]) + 0
+        coverage_naive[i] = (conf_scores[i] <= naive_cutoff[i]) + 0
+        coverage_cdf[i] = (conf_scores[i] <= cdf_cutoff[i]) + 0
+        coverage_local_cdf[i] = (conf_scores[i] <= local_cdf_cutoff[i]) + 0
+        coverage_a_locart[i] = (conf_scores[i] <= alocart_cutoff[i]) + 0
         i += 1
 
     # Creating a pandas DataFrame with the mean coverage values
@@ -631,6 +634,7 @@ def compute_coverage_repeated(
     prior_NPE,
     score_type,
     X_list=None,
+    X_test_list=None,
     B=5000,
     prop_calib=0.2,
     alpha=0.1,
@@ -678,11 +682,20 @@ def compute_coverage_repeated(
             X = None
             theta = None
 
+        if X_test_list is not None:
+            X_test = X_test_list["X_test"][j]
+            theta_test = X_test_list["theta_test"][j]
+        else:
+            X_test = None
+            theta_test = None
+
         coverage_df = compute_coverage(
             score_type=score_type,
             prior_NPE=prior_NPE,
             X=X,
             theta=theta,
+            X_test=X_test,
+            theta_test=theta_test,
             B=B,
             prop_calib=prop_calib,
             alpha=alpha,
@@ -707,6 +720,7 @@ all_coverage_df = compute_coverage_repeated(
     score_type=score_type,
     prior_NPE=prior_NPE,
     X_list=X_list,
+    X_test_list=X_test_list,
     B=B,
     prop_calib=p_calib,
     alpha=alpha,
