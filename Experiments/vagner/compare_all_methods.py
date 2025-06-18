@@ -130,9 +130,9 @@ if X_str:
     with open(theta_data_path, "rb") as f:
         theta_list = pickle.load(f)
 
-    X_dict = {"X": X_list, "theta": theta_list}
+    X_dict_used = {"X": X_list, "theta": theta_list}
 else:
-    X_dict = None
+    X_dict_used = None
 
 # Set the random seed for reproducibility
 alpha = 0.1
@@ -289,9 +289,9 @@ def compute_coverage(
     B_train = int(B * (1 - prop_calib))
     B_calib = int(B * prop_calib)
 
-    def cpu_simulator(parameters):
-        with torch.no_grad():
-            return simulator(parameters.cpu())
+    def device_simulator(theta):
+        theta = theta.cpu()
+        return simulator(theta).to(device)
 
     if X is None and theta is None:
         # training samples
@@ -301,7 +301,6 @@ def compute_coverage(
         # training conformal methods
         thetas_calib = prior(num_samples=B_calib)
         X_calib = simulator(thetas_calib)
-
     else:
         # splitting X
         indices = torch.randperm(X.shape[0])
@@ -338,40 +337,38 @@ def compute_coverage(
     with open(posterior_data_path, "rb") as f:
         X_dict = pickle.load(f)
 
-    if num_obs < len(X_dict.keys()):
-        X_dict = {k: X_dict[k] for k in list(X_dict.keys())[:num_obs]}
-
-    X_obs = torch.cat(list(X_dict.keys())).numpy()
-
     i = 0
     dict_keys = list(X_dict.keys())
+
     # evaluating cutoff for each observation
-    for X_0 in tqdm(dict_keys, desc="Computing coverage across observations"):
+    for k in tqdm(range(num_obs), desc="Computing coverage across observations"):
+        X_0 = dict_keys[k]
         post_samples = X_dict[X_0]
+        x_o = X_0
 
         # dummy SNPE inference object
         base_inference = SNPE_C(prior=prior_NPE, device=device)
 
         if sequential:
             print("Fitting SNPE in sequential mode")
-            x_o = X_0
 
             # Fitting SNPE
             posteriors = []
             proposal = prior_NPE
 
             for j in range(num_rounds):
-                theta, x = simulate_for_sbi(
-                    cpu_simulator, proposal, num_simulations=500
-                )
+                if j == 0:
+                    print("Using training data for the first round")
+                    theta, x = theta_train, X_train
+                else:
+                    theta, x = simulate_for_sbi(
+                        device_simulator, proposal, num_simulations=500
+                    )
                 theta, x = theta.to(device), x.to(device)
+
                 density_estimator = base_inference.append_simulations(
                     theta, x, proposal=proposal
-                ).train(force_first_round_loss=True)
-
-                # using warm start for the first round
-                # if j == 0:
-                # density_estimator.load_state_dict(trained_net.state_dict())
+                ).train()
 
                 posterior = base_inference.build_posterior(density_estimator)
                 posteriors.append(posterior)
@@ -722,7 +719,7 @@ def compute_coverage_repeated(
 all_coverage_df = compute_coverage_repeated(
     score_type=score_type,
     prior_NPE=prior_NPE,
-    X_list=X_dict,
+    X_list=X_dict_used,
     B=B,
     prop_calib=p_calib,
     alpha=alpha,
