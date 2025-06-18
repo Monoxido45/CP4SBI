@@ -2,7 +2,6 @@
 import torch
 from sbi.utils import BoxUniform
 from sbi.inference import NPE, simulate_for_sbi, SNPE_C
-from sbi.inference import NPE, simulate_for_sbi, SNPE_C
 from CP4SBI.baycon import BayCon
 from CP4SBI.scores import HPDScore, WALDOScore
 from sbi.utils.user_input_checks import process_prior
@@ -290,9 +289,9 @@ def compute_coverage(
     B_train = int(B * (1 - prop_calib))
     B_calib = int(B * prop_calib)
 
-    def device_simulator(parameters, device="cpu"): 
-        with torch.no_grad():
-            return simulator(parameters.to(device))
+    def device_simulator(theta):
+        theta = theta.cpu()
+        return simulator(theta).to(device)
 
     if X is None and theta is None:
         # training samples
@@ -341,10 +340,6 @@ def compute_coverage(
     i = 0
     dict_keys = list(X_dict.keys())
 
-    # Testing
-    base_inference_default = SNPE_C(prior=prior_NPE, device=device)
-    base_inference_default.append_simulations(theta_train, X_train).train()  
-
     # evaluating cutoff for each observation
     for k in tqdm(range(num_obs), desc="Computing coverage across observations"):
         X_0 = dict_keys[k]
@@ -352,20 +347,23 @@ def compute_coverage(
         x_o = X_0
 
         # dummy SNPE inference object
-        base_inference = base_inference_default    
+        base_inference = SNPE_C(prior=prior_NPE, device=device)
 
         if sequential:
             print("Fitting SNPE in sequential mode")
-            x_o = X_0.to(device)
 
             # Fitting SNPE
             posteriors = []
             proposal = prior_NPE
 
             for j in range(num_rounds):
-                theta, x = simulate_for_sbi(
-                    device_simulator, proposal, num_simulations=2000
-                )
+                if j == 0:
+                    print("Using training data for the first round")
+                    theta, x = theta_train, X_train
+                else:
+                    theta, x = simulate_for_sbi(
+                        device_simulator, proposal, num_simulations=500
+                    )
                 theta, x = theta.to(device), x.to(device)
 
                 density_estimator = base_inference.append_simulations(
