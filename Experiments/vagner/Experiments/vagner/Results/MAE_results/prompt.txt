@@ -1,0 +1,2 @@
+conda activate cp4sbi_env
+python compare_all_methods.py --task "gaussian_linear" --n_rep 2 --B 200 --n_x 100
