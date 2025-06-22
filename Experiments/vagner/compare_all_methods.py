@@ -337,7 +337,6 @@ def compute_coverage(
     with open(posterior_data_path, "rb") as f:
         X_dict = pickle.load(f)
 
-    i = 0
     dict_keys = list(X_dict.keys())
 
     # evaluating cutoff for each observation
@@ -345,6 +344,7 @@ def compute_coverage(
         X_0 = dict_keys[k]
         post_samples = X_dict[X_0]
         x_o = X_0
+        print(f"Observation {X_0}")
 
         # dummy SNPE inference object
         base_inference = SNPE_C(prior=prior_NPE, device=device)
@@ -604,22 +604,20 @@ def compute_coverage(
                     conf_scores[j] = (mean_array - sel_sample) ** 2 / (inv_matrix)
 
         # computing coverage
-        coverage_locart[i] = np.mean(conf_scores <= locart_cutoff)
-        coverage_global[i] = np.mean(conf_scores <= global_cutoff)
-        coverage_naive[i] = np.mean(conf_scores <= closest_t)
-        coverage_cdf[i] = np.mean(conf_scores <= cdf_cutoff)
-        coverage_local_cdf[i] = np.mean(conf_scores <= local_cdf_cutoff)
-        coverage_a_locart[i] = np.mean(conf_scores <= alocart_cutoff)
-        coverage_hdr[i] = np.mean(hdr_conf_scores <= hdr_cutoff)
+        coverage_locart[k] = np.mean(conf_scores <= locart_cutoff)
+        coverage_global[k] = np.mean(conf_scores <= global_cutoff)
+        coverage_naive[k] = np.mean(conf_scores <= closest_t)
+        coverage_cdf[k] = np.mean(conf_scores <= cdf_cutoff)
+        coverage_local_cdf[k] = np.mean(conf_scores <= local_cdf_cutoff)
+        coverage_a_locart[k] = np.mean(conf_scores <= alocart_cutoff)
+        coverage_hdr[k] = np.mean(hdr_conf_scores <= hdr_cutoff)
 
-        print(f"A-LOCART Coverage for observation {i}: {coverage_a_locart[i]}")
-        print(f"Naive Coverage for observation {i}: {coverage_naive[i]}")
+        print(f"A-LOCART Coverage for observation {k}: {coverage_a_locart[k]}")
+        print(f"Naive Coverage for observation {k}: {coverage_naive[k]}")
         # Printing CDF and Local CDF coverage for the current observation
-        print(f"CDF Coverage for observation {i}: {coverage_cdf[i]}")
-        print(f"Local CDF Coverage for observation {i}: {coverage_local_cdf[i]}")
-        print(f"Global Coverage for observation {i}: {coverage_global[i]}")
-
-        i += 1
+        print(f"CDF Coverage for observation {k}: {coverage_cdf[k]}")
+        print(f"Local CDF Coverage for observation {k}: {coverage_local_cdf[k]}")
+        print(f"Global Coverage for observation {k}: {coverage_global[k]}")
 
     # Creating a pandas DataFrame with the mean coverage values
     coverage_df = pd.DataFrame(

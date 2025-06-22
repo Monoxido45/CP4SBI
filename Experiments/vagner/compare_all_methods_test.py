@@ -19,7 +19,6 @@ from torch.distributions.log_normal import LogNormal
 # for plotting and broadcasting
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-import seaborn as sns
 import numpy as np
 import math
 
@@ -365,9 +364,9 @@ def compute_coverage(
         X_dict = {k: X_dict[k] for k in list(X_dict.keys())[:num_obs]}
 
     X_obs = torch.cat(list(X_dict.keys())).numpy()
-        
+
     base_inference_default = NPE(prior=prior_NPE, device=device)
-    base_inference_default.append_simulations(theta_train, X_train).train()  
+    base_inference_default.append_simulations(theta_train, X_train).train()
 
     i = 0
     dict_keys = list(X_dict.keys())
@@ -379,7 +378,7 @@ def compute_coverage(
 
         # dummy SNPE inference object
         # base_inference = NPE(prior=prior_NPE, device=device)
-        base_inference = base_inference_default 
+        base_inference = base_inference_default
 
         if sequential:
             print("Fitting SNPE in sequential mode")
@@ -410,9 +409,7 @@ def compute_coverage(
                 posterior_samples = posterior.sample((1000,), x=x_o.to(device))
 
                 # plot posterior samples
-                fig, ax = pairplot(
-                posterior_samples.cpu(),  figsize=(5, 5)
-                )
+                fig, ax = pairplot(posterior_samples.cpu(), figsize=(5, 5))
                 plt.show()
 
         # initializing inference object by the last density estimator
@@ -571,7 +568,7 @@ def compute_coverage(
                 or task_name == "gaussian_mixture"
             ):
                 closest_t = naive_method(
-                    post_estim, 
+                    post_estim,
                     X=X_0,
                     alpha=alpha,
                     score_type=score_type,
