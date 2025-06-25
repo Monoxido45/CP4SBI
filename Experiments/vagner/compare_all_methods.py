@@ -7,7 +7,6 @@ from CP4SBI.scores import HPDScore, WALDOScore
 from sbi.utils.user_input_checks import process_prior
 from sbi.utils import MultipleIndependent
 from CP4SBI.utils import naive_method, hdr_method
-from CP4SBI.gmm_task import GaussianMixture
 
 # for benchmarking
 import sbibm
@@ -98,6 +97,21 @@ parser.add_argument(
     type=float,
 )
 
+parser.add_argument(
+    "--n_rounds",
+    "-n_rounds",
+    help="Number of rounds for sequential inference",
+    default=10,
+    type=int,
+)
+
+parser.add_argument(
+    "--n_obs_rounds",
+    "-n_obs_rounds",
+    help="Number of observations to generate per round",
+    default=500,
+    type=int,
+)
 
 original_path = os.getcwd()
 if __name__ == "__main__":
@@ -114,6 +128,8 @@ device = args.device
 score_type = args.score
 X_str = args.X_list == "True"
 num_obs = args.n_x
+n_rounds = args.n_rounds
+n_obs_rounds = args.n_obs
 
 if X_str:
     # Load the X_list pickle file from the X_data folder
@@ -162,7 +178,7 @@ elif task_name == "gaussian_linear_uniform":
         high=1 * torch.ones(10),
         device=device,
     )
-elif task_name == "slcp":
+elif task_name == "slcp" or task_name == "slcp_distractors":
     prior_NPE = BoxUniform(
         low=-3 * torch.ones(5),
         high=3 * torch.ones(5),
@@ -180,7 +196,7 @@ elif task_name == "gaussian_linear":
         validate_args=False,
     )
     prior_NPE, _, _ = process_prior(prior_dist)
-elif task_name == "bernoulli_glm" or "bernoulli_glm_raw":
+elif task_name == "bernoulli_glm" or task_name == "bernoulli_glm_raw":
     dim_parameters = 10
     # parameters for the prior distribution
     M = dim_parameters - 1
@@ -211,7 +227,6 @@ elif task_name == "gaussian_mixture":
         high=3 * torch.ones(2),
         device=device,
     )
-
 elif task_name == "sir":
     prior_list = [
         LogNormal(
@@ -262,6 +277,11 @@ elif task_name == "lotka_volterra":
     prior_NPE, _, _ = process_prior(prior_dist)
 
 
+def device_simulator(theta):
+    theta = theta.cpu()
+    return simulator(theta).to(device)
+
+
 def compute_coverage(
     prior_NPE,
     score_type,
@@ -279,6 +299,7 @@ def compute_coverage(
     sequential=False,
     num_rounds=10,
     split_calib=False,
+    n_obs_rounds=500,
 ):
     # setting seet
     torch.manual_seed(random_seed)
@@ -288,10 +309,6 @@ def compute_coverage(
     # splitting simulation budget
     B_train = int(B * (1 - prop_calib))
     B_calib = int(B * prop_calib)
-
-    def device_simulator(theta):
-        theta = theta.cpu()
-        return simulator(theta).to(device)
 
     if X is None and theta is None:
         # training samples
@@ -362,7 +379,9 @@ def compute_coverage(
                     theta, x = theta_train, X_train
                 else:
                     theta, x = simulate_for_sbi(
-                        device_simulator, proposal, num_simulations=500
+                        device_simulator,
+                        proposal,
+                        num_simulations=n_obs_rounds,
                     )
                 theta, x = theta.to(device), x.to(device)
 
@@ -650,9 +669,9 @@ def compute_coverage_repeated(
     n_rep=30,
     sequential=True,
     num_rounds=5,
+    n_obs_rounds=500,
 ):
     # Generate an array of seeds using the central_seed
-    # seeds = np.random.RandomState(central_seed).randint(0, 2**32 - 1, size=n_rep)
     seeds = np.random.RandomState(central_seed).randint(0, 2**31 - 1, size=n_rep)
 
     # Initialize an empty list to store coverage results
@@ -701,8 +720,9 @@ def compute_coverage_repeated(
             random_seed=seed,
             min_samples_leaf=min_samples_leaf,
             naive_samples=naive_samples,
-            sequential=True,
+            sequential=sequential,
             num_rounds=num_rounds,
+            n_obs_rounds=n_obs_rounds,
         )
         coverage_results.append(coverage_df)
 
@@ -715,8 +735,8 @@ def compute_coverage_repeated(
 
 
 all_coverage_df = compute_coverage_repeated(
-    score_type=score_type,
     prior_NPE=prior_NPE,
+    score_type=score_type,
     X_list=X_dict_used,
     B=B,
     prop_calib=p_calib,
@@ -729,7 +749,8 @@ all_coverage_df = compute_coverage_repeated(
     naive_samples=1000,
     n_rep=n_rep,
     sequential=True,
-    num_rounds=10,
+    num_rounds=n_rounds,
+    n_obs_rounds=n_obs_rounds,
 )
 
 # Create the "MAE_results" folder if it doesn't exist

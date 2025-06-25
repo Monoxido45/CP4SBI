@@ -179,7 +179,7 @@ elif task_name == "gaussian_linear_uniform":
         high=1 * torch.ones(10),
         device=device,
     )
-elif task_name == "slcp":
+elif task_name == "slcp" or task_name == "slcp_distractors":
     prior_NPE = BoxUniform(
         low=-3 * torch.ones(5),
         high=3 * torch.ones(5),
@@ -224,8 +224,8 @@ elif task_name == "bernoulli_glm" or "bernoulli_glm_raw":
     prior_NPE, _, _ = process_prior(prior_dist)
 elif task_name == "gaussian_mixture":
     prior_NPE = BoxUniform(
-        low=-5 * torch.ones(2),
-        high=5 * torch.ones(2),
+        low=-3 * torch.ones(2),
+        high=3 * torch.ones(2),
         device=device,
     )
 elif task_name == "sir":
