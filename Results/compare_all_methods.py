@@ -179,7 +179,7 @@ elif task_name == "gaussian_linear_uniform":
         high=1 * torch.ones(10),
         device=device,
     )
-elif task_name == "slcp":
+elif task_name == "slcp" or task_name == "slcp_distractors":
     prior_NPE = BoxUniform(
         low=-3 * torch.ones(5),
         high=3 * torch.ones(5),
