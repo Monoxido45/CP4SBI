@@ -129,7 +129,7 @@ score_type = args.score
 X_str = args.X_list == "True"
 num_obs = args.n_x
 n_rounds = args.n_rounds
-n_obs_rounds = args.n_obs
+n_obs_rounds = args.n_obs_rounds
 
 if X_str:
     # Load the X_list pickle file from the X_data folder
