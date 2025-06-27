@@ -14,14 +14,18 @@ from copy import deepcopy
 
 from torch.distributions.multivariate_normal import MultivariateNormal
 from sbi.utils.user_input_checks import process_prior
+from torch.distributions.log_normal import LogNormal
+from sbi.utils import MultipleIndependent
+
 
 # for setting input variables
 import argparse
+import math
 
 original_path = os.getcwd()
 # Set random seeds for reproducibility
-torch.manual_seed(45)
-torch.cuda.manual_seed(45)
+torch.manual_seed(125)
+torch.cuda.manual_seed(125)
 alpha = 0.1
 
 parser = argparse.ArgumentParser()
@@ -60,7 +64,7 @@ if task_name == "gaussian_linear_uniform":
         high=1 * torch.ones(2),
         device=device,
     )
-elif task_name == "slcp":
+elif task_name == "slcp" or task_name == "slcp_distractors":
     prior_NPE = BoxUniform(
         low=-3 * torch.ones(2),
         high=3 * torch.ones(2),
@@ -76,7 +80,7 @@ elif task_name == "gaussian_linear":
         validate_args=False,
     )
     prior_NPE, _, _ = process_prior(prior_dist)
-elif task_name == "bernoulli_glm" or "bernoulli_glm_raw":
+elif task_name == "bernoulli_glm" or task_name == "bernoulli_glm_raw":
     dim_parameters = 2
     # parameters for the prior distribution
     M = dim_parameters - 1
@@ -101,7 +105,29 @@ elif task_name == "bernoulli_glm" or "bernoulli_glm_raw":
         validate_args=False,
     )
     prior_NPE, _, _ = process_prior(prior_dist)
+elif task_name == "lotka_volterra":
+    mu_p1 = -0.125
+    mu_p2 = -3.0
+    sigma_p = 0.5
+    prior_params = {
+        "loc": torch.tensor([mu_p1, mu_p2], device=device),
+        "scale": torch.tensor([sigma_p, sigma_p], device=device),
+    }
 
+    prior_list = [
+        LogNormal(
+            loc=torch.tensor([mu_p1], device=device),
+            scale=torch.tensor([sigma_p], device=device),
+            validate_args=False,
+        ),
+        LogNormal(
+            loc=torch.tensor([mu_p2], device=device),
+            scale=torch.tensor([sigma_p], device=device),
+            validate_args=False,
+        ),
+    ]
+    prior_dist = MultipleIndependent(prior_list, validate_args=False)
+    prior_NPE, _, _ = process_prior(prior_dist)
 
 # Data split parameters
 B = 10000
