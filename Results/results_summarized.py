@@ -8,23 +8,19 @@ import matplotlib.pyplot as plt
 original_path = os.getcwd()
 
 # Define the folder containing the files
-folder_path = os.path.join(original_path, "Results/MAE_results")
+folder_path_npe = os.path.join(original_path, "Results/MAE_results")
+folder_path_seq = os.path.join(original_path, "Experiments/vagner/Results/MAE_results")
+folder_path_npse = os.path.join(original_path, "Results/MAE_results_NPSE")
 
 # Find all files in the folder with "HPD" and "summary" in their names
-file_pattern = os.path.join(folder_path, "*HPD*summary*.csv")
+file_pattern = os.path.join(folder_path_npe, "*HPD*summary*.csv")
 files_hpd = [f for f in glob.glob(file_pattern)]
 
-file_pattern_waldo = os.path.join(folder_path, "*WALDO*summary*.csv")
-files_waldo = [
-    f
-    for f in glob.glob(file_pattern_waldo)
-    if all(excluded not in f for excluded in ["gaussian_mixture"])
-]
-
-files_all = files_hpd + files_waldo
+file_pattern_npse = os.path.join(folder_path_npse, "*KDE*summary*.csv")
+files_hpd_npse = [f for f in glob.glob(file_pattern_npse)]
 
 
-def create_heat_matrix(files):
+def create_heat_matrix(files, name="NPE"):
     sim_matrix = {}
     mae_matrices, se_matrices = {}, {}
 
@@ -33,20 +29,32 @@ def create_heat_matrix(files):
         int(os.path.basename(file).split("_")[-1].split(".")[0]) for file in files
     ]
 
-    file_dict = {
-        10000: [
-            file
-            for file, budget in zip(files, simulation_budgets_lists)
-            if budget == 10000
-        ],
-        20000: [
-            file
-            for file, budget in zip(files, simulation_budgets_lists)
-            if budget == 20000
-        ],
-    }
+    if name == "NPE":
+        file_dict = {
+            10000: [
+                file
+                for file, budget in zip(files, simulation_budgets_lists)
+                if budget == 10000
+            ],
+            20000: [
+                file
+                for file, budget in zip(files, simulation_budgets_lists)
+                if budget == 20000
+            ],
+        }
 
-    budgets = [10000, 20000]
+        budgets = [10000, 20000]
+    elif name == "NPSE":
+        file_dict = {
+            10000: [
+                file
+                for file, budget in zip(files, simulation_budgets_lists)
+                if budget == 10000
+            ]
+        }
+
+        budgets = [10000]
+
     j = 0
     for file_list in file_dict.values():
         # Initialize a dictionary to store counts for each method per benchmark
@@ -151,46 +159,120 @@ def create_heat_matrix(files):
 
     # producing the heatmap
     plt.rcParams.update({"font.size": 14})
-    fig, axes = plt.subplots(1, len(budgets), figsize=(18, 8))
-    for idx, budget in enumerate(budgets):
-        ax = axes[idx]
+    if len(budgets) > 1:
+        fig, axes = plt.subplots(1, len(budgets), figsize=(18, 8))
+        for idx, budget in enumerate(budgets):
+            ax = axes[idx]
+            mae_matrix = mae_matrices[budget]
+            se_matrix = se_matrices[budget]
+            significance_matrix = sim_matrix[budget]
+
+            # Define a discrete colormap with two colors: green for significant, white for not significant
+            cmap = ListedColormap(["white", "mediumseagreen"])  # Light green color
+
+            sorted_benchmark_names = sorted(benchmark_names)
+
+            # Define the desired order for specific columns
+            desired_order = ["LOCART", "CDF", "L-CDF"]
+            remaining_columns = [
+                col for col in column_names if col not in desired_order
+            ]
+            ordered_columns = desired_order + remaining_columns
+
+            # Reorder the columns (benchmarks) based on the sorted benchmark names
+            mae_matrix = mae_matrix[sorted_benchmark_names]
+            se_matrix = se_matrix[sorted_benchmark_names]
+            significance_matrix = significance_matrix[sorted_benchmark_names]
+
+            # Reorder the rows (methods) based on the desired order
+            mae_matrix = mae_matrix.loc[ordered_columns]
+            se_matrix = se_matrix.loc[ordered_columns]
+            significance_matrix = significance_matrix.loc[ordered_columns]
+
+            # Create a matrix for coloring based on significance
+            color_matrix = significance_matrix.replace({False: 0, True: 1}).to_numpy()
+
+            # Plot the heatmap with the discrete colormap
+            heatmap = ax.imshow(color_matrix, cmap=cmap, aspect="auto")
+
+            # Add gridlines to separate tiles
+            ax.set_xticks(np.arange(-0.5, len(mae_matrix.columns), 1), minor=True)
+            ax.set_yticks(np.arange(-0.5, len(mae_matrix.index), 1), minor=True)
+            ax.grid(which="minor", color="black", linestyle="-", linewidth=0.5)
+            ax.tick_params(which="minor", bottom=False, left=False)
+
+            # Add text (MAE and SE values) to each tile
+            for i in range(mae_matrix.shape[0]):
+                for j in range(mae_matrix.shape[1]):
+                    value = mae_matrix.iloc[i, j]
+                    se_value = se_matrix.iloc[i, j]
+                    ax.text(
+                        j,
+                        i,
+                        f"{value:.3f}\n({se_value:.4f})",
+                        ha="center",
+                        va="center",
+                        color="black",
+                        fontsize=10,
+                    )
+
+            # Set axis labels and ticks
+            ax.set_xlabel("Benchmarks")
+            if idx == 0:
+                ax.set_ylabel("Methods")
+            else:
+                ax.set_ylabel("")
+
+            ax.set_xticks(range(len(mae_matrix.columns)))
+            ax.set_xticklabels(mae_matrix.columns, rotation=45, ha="right")
+
+            ax.tick_params(axis="x", labelsize=10)
+            ax.set_yticks(range(len(mae_matrix.index)))
+            ax.set_yticklabels(mae_matrix.index)
+            for tick, label in zip(ax.get_yticklabels(), mae_matrix.index):
+                if label in ["LOCART", "CDF", "L-CDF"]:
+                    tick.set_fontweight("bold")
+            ax.set_title(f"Budget: {budget}")
+
+        plt.tight_layout()
+        # Save the figure to the specified path
+        output_path = os.path.join(
+            original_path, "Results", f"{name}_heatmap_figure.png"
+        )
+        output_path_pdf = os.path.splitext(output_path)[0] + ".pdf"
+        fig.savefig(output_path_pdf, format="pdf")
+        plt.show()
+    else:
+        fig, ax = plt.subplots(figsize=(9, 8))
+        budget = budgets[0]
         mae_matrix = mae_matrices[budget]
         se_matrix = se_matrices[budget]
         significance_matrix = sim_matrix[budget]
 
-        # Define a discrete colormap with two colors: green for significant, white for not significant
-        cmap = ListedColormap(["white", "mediumseagreen"])  # Light green color
+        cmap = ListedColormap(["white", "mediumseagreen"])
 
         sorted_benchmark_names = sorted(benchmark_names)
-
-        # Define the desired order for specific columns
         desired_order = ["LOCART", "CDF", "L-CDF"]
         remaining_columns = [col for col in column_names if col not in desired_order]
         ordered_columns = desired_order + remaining_columns
 
-        # Reorder the columns (benchmarks) based on the sorted benchmark names
         mae_matrix = mae_matrix[sorted_benchmark_names]
         se_matrix = se_matrix[sorted_benchmark_names]
         significance_matrix = significance_matrix[sorted_benchmark_names]
 
-        # Reorder the rows (methods) based on the desired order
         mae_matrix = mae_matrix.loc[ordered_columns]
         se_matrix = se_matrix.loc[ordered_columns]
         significance_matrix = significance_matrix.loc[ordered_columns]
 
-        # Create a matrix for coloring based on significance
         color_matrix = significance_matrix.replace({False: 0, True: 1}).to_numpy()
 
-        # Plot the heatmap with the discrete colormap
         heatmap = ax.imshow(color_matrix, cmap=cmap, aspect="auto")
 
-        # Add gridlines to separate tiles
         ax.set_xticks(np.arange(-0.5, len(mae_matrix.columns), 1), minor=True)
         ax.set_yticks(np.arange(-0.5, len(mae_matrix.index), 1), minor=True)
         ax.grid(which="minor", color="black", linestyle="-", linewidth=0.5)
         ax.tick_params(which="minor", bottom=False, left=False)
 
-        # Add text (MAE and SE values) to each tile
         for i in range(mae_matrix.shape[0]):
             for j in range(mae_matrix.shape[1]):
                 value = mae_matrix.iloc[i, j]
@@ -205,16 +287,10 @@ def create_heat_matrix(files):
                     fontsize=10,
                 )
 
-        # Set axis labels and ticks
         ax.set_xlabel("Benchmarks")
-        if idx == 0:
-            ax.set_ylabel("Methods")
-        else:
-            ax.set_ylabel("")
-
+        ax.set_ylabel("Methods")
         ax.set_xticks(range(len(mae_matrix.columns)))
         ax.set_xticklabels(mae_matrix.columns, rotation=45, ha="right")
-
         ax.tick_params(axis="x", labelsize=10)
         ax.set_yticks(range(len(mae_matrix.index)))
         ax.set_yticklabels(mae_matrix.index)
@@ -223,17 +299,27 @@ def create_heat_matrix(files):
                 tick.set_fontweight("bold")
         ax.set_title(f"Budget: {budget}")
 
-    plt.tight_layout()
-    # Save the figure to the specified path
-    output_path = os.path.join(original_path, "Results", "heatmap_figure.png")
-    output_path_pdf = os.path.splitext(output_path)[0] + ".pdf"
-    fig.savefig(output_path_pdf, format="pdf")
-    plt.show()
+        plt.tight_layout()
+        output_path = os.path.join(
+            original_path, "Results", f"{name}_heatmap_figure.png"
+        )
+        output_path_pdf = os.path.splitext(output_path)[0] + ".pdf"
+        fig.savefig(output_path_pdf, format="pdf")
+        plt.show()
     return sim_matrix, mae_matrices, se_matrices
 
 
 # Example usage
-sim_mat, mae_mat, se_mat = create_heat_matrix(files_hpd)
+sim_mat, mae_mat, se_mat = create_heat_matrix(
+    files_hpd,
+    name="NPE",
+)
+
+# For NPSE files
+sim_mat_npse, mae_mat_npse, se_mat_npse = create_heat_matrix(
+    files_hpd_npse,
+    name="NPSE",
+)
 
 
 def method_counting(files):
@@ -357,6 +443,10 @@ method_counts_hpd = method_counting(files_hpd)
 
 method_counts_hpd_2 = method_counting_exclude_locart_cdf(files_hpd)
 
+method_counts_hpd_npse = method_counting(files_hpd_npse)
+
+method_counts_hpd_npse_2 = method_counting_exclude_locart_cdf(files_hpd_npse)
+
 # Sorting the method counts in descending order
 sorted_counts_hpd = dict(
     sorted(method_counts_hpd.items(), key=lambda item: item[1], reverse=True)
@@ -364,6 +454,14 @@ sorted_counts_hpd = dict(
 
 sorted_counts_hpd_2 = dict(
     sorted(method_counts_hpd_2.items(), key=lambda item: item[1], reverse=True)
+)
+
+# Sorting the method counts for NPSE in descending order
+sorted_counts_hpd_npse = dict(
+    sorted(method_counts_hpd_npse.items(), key=lambda item: item[1], reverse=True)
+)
+sorted_counts_hpd_npse_2 = dict(
+    sorted(method_counts_hpd_npse_2.items(), key=lambda item: item[1], reverse=True)
 )
 
 # Create a graph for HPD counting
@@ -388,74 +486,25 @@ ax_hpd.set_ylim(0, max(sorted_counts_hpd_2.values()) + 1)
 plt.tight_layout()
 plt.show()
 
-method_counts_waldo = method_counting(files_waldo)
-method_counts_all = method_counting(files_all)
 
-sorted_counts_waldo = dict(
-    sorted(method_counts_waldo.items(), key=lambda item: item[1], reverse=True)
-)
+# Create a graph for HPD counting
+fig_hpd, ax_hpd = plt.subplots(figsize=(10, 5))
 
-sorted_counts_all = dict(
-    sorted(method_counts_all.items(), key=lambda item: item[1], reverse=True)
-)
-
-
-# Create subplots for each sorted count in a single row
-fig, axes = plt.subplots(1, 3, figsize=(20, 5))
-
-# Plot for HPD
-axes[0].bar(sorted_counts_hpd.keys(), sorted_counts_hpd.values(), color="skyblue")
-axes[0].set_title("Best Performance Count (HPD)")
-axes[0].set_ylabel("Count")
-axes[0].set_xticks(range(len(sorted_counts_hpd)))
-axes[0].set_xticklabels(
+ax_hpd.bar(sorted_counts_hpd_2.keys(), sorted_counts_hpd_2.values(), color="skyblue")
+ax_hpd.set_title("Best Performance Count (HPD)")
+ax_hpd.set_ylabel("Count")
+ax_hpd.set_xticks(range(len(sorted_counts_hpd_2)))
+ax_hpd.set_xticklabels(
     [
         (
             f"$\\bf{{{label}}}$"
-            if label in ["LOCART", "CDF CP", "A-LOCART", "L-CDF CP"]
+            if label in ["LOCART", "CDF", "A-LOCART", "L-CDF"]
             else label
         )
-        for label in sorted_counts_hpd.keys()
+        for label in sorted_counts_hpd_2.keys()
     ]
 )
+ax_hpd.set_ylim(0, max(sorted_counts_hpd_2.values()) + 1)
 
-# Plot for WALDO
-axes[1].bar(
-    sorted_counts_waldo.keys(), sorted_counts_waldo.values(), color="lightgreen"
-)
-axes[1].set_title("Best Performance Count (WALDO)")
-axes[1].set_xticks(range(len(sorted_counts_waldo)))
-axes[1].set_xticklabels(
-    [
-        (
-            f"$\\bf{{{label}}}$"
-            if label in ["LOCART", "CDF CP", "A-LOCART", "L-CDF CP"]
-            else label
-        )
-        for label in sorted_counts_waldo.keys()
-    ]
-)
-
-# Plot for All
-axes[2].bar(sorted_counts_all.keys(), sorted_counts_all.values(), color="salmon")
-axes[2].set_title("Best Performance Count (All)")
-axes[2].set_xlabel("Methods")
-axes[2].set_xticks(range(len(sorted_counts_all)))
-axes[2].set_xticklabels(
-    [
-        (
-            f"$\\bf{{{label}}}$"
-            if label in ["LOCART", "CDF CP", "A-LOCART", "L-CDF CP"]
-            else label
-        )
-        for label in sorted_counts_all.keys()
-    ]
-)
-# Set individual y-axis limits for each plot
-axes[0].set_ylim(0, max(sorted_counts_hpd.values()) + 1)
-axes[1].set_ylim(0, max(sorted_counts_waldo.values()) + 1)
-axes[2].set_ylim(0, max(sorted_counts_all.values()) + 1)
-
-# Adjust layout and display the chart
 plt.tight_layout()
 plt.show()
