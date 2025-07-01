@@ -11,11 +11,10 @@ from sbi.utils import BoxUniform
 from sbi.inference import NPE
 from CP4SBI.baycon import BayCon
 from CP4SBI.scores import HPDScore
-from CP4SBI.utils import conditional_hdr_recalibration, hdr_method, naive_method
+from CP4SBI.utils import naive_method
 
 # testing naive
 import sbibm
-from sklearn.neighbors import KernelDensity
 from matplotlib.lines import Line2D
 
 original_path = os.getcwd()
