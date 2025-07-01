@@ -162,7 +162,7 @@ if task_name != "gaussian_mixture":
 else:
     from CP4SBI.gmm_task import GaussianMixture
 
-    task = GaussianMixture(dim=2, prior_bound=5.0)
+    task = GaussianMixture(dim=2, prior_bound=3.0)
     simulator = task.get_simulator()
     prior = task.get_prior()
 
