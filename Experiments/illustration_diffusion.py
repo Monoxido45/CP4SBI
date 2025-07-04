@@ -87,10 +87,195 @@ target_coverage = 0.9
 torch.manual_seed(45)
 torch.cuda.manual_seed(45)
 # first X_obs
-theta_real = torch.tensor([[1.25, -0.3], [0.75, 0.7]])
+theta_real = torch.tensor([[0.25, -0.25]])
 # generating X_obs
 X_obs = simulator(theta_real)
 
 locart_cutoff = bayes_conf.predict_cutoff(X_obs)
 
+# obtaining the naive cutoff
+naive_cutoff = naive_method(
+    post_estim,
+    X=X_obs,
+    alpha=0.1,
+    score_type="HPD",
+    device=device,
+    B_naive=1000,
+    kde=True,
+)
+
+# first simulating sample from the posterior
+posterior_samples = post_estim.sample((1000,), x=X_obs.to(device)).cpu().numpy()
+
+# deriving KDE estimator and contour lines
+kde = gaussian_kde(posterior_samples.T)
+x = np.linspace(-3, 3, 100)
+y = np.linspace(-3, 3, 100)
+X, Y = np.meshgrid(x, y)
+positions = np.vstack([X.ravel(), Y.ravel()])
+Z = kde(positions).reshape(X.shape)
+
+# obtaining the credible region using locart
+# using Z already
+credible_mask = -Z <= locart_cutoff
+naive_mask = -Z <= naive_cutoff
+
+# comparisson with ground truth
+true_post_samples = task._sample_reference_posterior(
+    num_samples=1000,
+    observation=X_obs,
+)
+
+kde_true = -kde(true_post_samples.T)
+
+t_grid = np.arange(
+    np.min(kde_true),
+    np.max(kde_true),
+    0.01,
+)
+
+# computing MC integral for all t_grid
+coverage_array = np.zeros(t_grid.shape[0])
+for t in t_grid:
+    coverage_array[t_grid == t] = np.mean(kde_true <= t)
+
+closest_t_index = np.argmin(np.abs(coverage_array - target_coverage))
+# finally, finding the naive cutoff
+oracle_cutoff = t_grid[closest_t_index]
+
+oracle_mask = -Z <= oracle_cutoff
+
+# computing coverage
+coverage = np.mean(kde_true <= locart_cutoff)
+coverage_naive = np.mean(kde_true <= naive_cutoff)
+print(f"Coverage of the credible region: {coverage:.3f}")
+print(f"Naive coverage: {coverage_naive:.3f}")
+
 # generating the panels
+fig, axs = plt.subplots(1, 3, figsize=(18, 6))
+plt.rcParams.update({"font.size": 14})
+
+# Panel 1: Scatter plot of posterior samples
+axs[0].scatter(
+    posterior_samples[:, 0], posterior_samples[:, 1], alpha=0.3, s=8, color="black"
+)
+axs[0].set_title("Generated Posterior Samples")
+axs[0].set_xlabel(r"$\theta_1$")
+axs[0].set_ylabel(r"$\theta_2$")
+
+# Panel 2: KDE contour lines
+axs[1].contour(X, Y, Z, levels=10)
+axs[1].set_title("Fitted KDE")
+axs[1].set_xlabel(r"$\theta_1$")
+axs[1].set_ylabel("")
+# Overlay scatter plot on KDE contours
+axs[1].scatter(
+    posterior_samples[:, 0], posterior_samples[:, 1], alpha=0.3, s=8, color="black"
+)
+
+# Panel 3: Credible region using locart_cutoff
+# Evaluate log-probability for each grid point
+# Plot oracle_mask contour (unfilled, black lines)
+axs[2].contour(
+    X, Y, oracle_mask, levels=[0.5], colors="black", linewidths=2, label="Oracle Cutoff"
+)
+# Plot naive_mask contour (unfilled, red dashed lines)
+axs[2].contour(
+    X,
+    Y,
+    naive_mask,
+    levels=[0.5],
+    colors="red",
+    linestyles="dashed",
+    linewidths=2,
+    label="Naive Cutoff",
+)
+axs[2].contourf(
+    X,
+    Y,
+    credible_mask,
+    levels=[0.5, 1],
+    colors=["tab:blue"],
+    alpha=0.5,
+    label="LOCART region",
+)
+axs[2].contour(X, Y, Z, levels=10, colors="k", linewidths=0.5, alpha=0.3)
+axs[2].set_title("Credible Region (CP4SBI-LOCART)")
+axs[2].set_xlabel(r"$\theta_1$")
+axs[2].set_ylabel("")
+# Overlay scatter plot on credible region panel
+axs[2].scatter(
+    posterior_samples[:, 0], posterior_samples[:, 1], alpha=0.3, s=8, color="black"
+)
+# Add coverage as a text element in the panel
+axs[2].text(
+    0.015,
+    0.975,
+    f"CP4SBI Coverage: {coverage:.2f}",
+    transform=axs[2].transAxes,
+    fontsize=10,
+    verticalalignment="top",
+    bbox=dict(boxstyle="round,pad=0.3", facecolor="tab:blue", alpha=0.5),
+)
+
+axs[2].text(
+    0.3675,
+    0.975,
+    f"Oracle coverage: 0.9",
+    transform=axs[2].transAxes,
+    fontsize=10,
+    verticalalignment="top",
+    bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.5),
+)
+
+axs[2].text(
+    0.69,
+    0.975,
+    f"Naive Coverage: {coverage_naive:.2f}",
+    transform=axs[2].transAxes,
+    fontsize=10,
+    verticalalignment="top",
+    bbox=dict(boxstyle="round,pad=0.3", facecolor="red", alpha=0.5),
+)
+
+# Set the same axis limits for all subplots
+for ax in axs:
+    ax.set_xlim(-3.05, 3.05)
+    ax.set_ylim(-3.05, 3.05)
+
+# Create custom legend handles
+legend_elements = [
+    Line2D([0], [0], color="black", lw=2, label="Oracle"),
+    Line2D([0], [0], color="red", lw=2, linestyle="dashed", label="Naive"),
+    Line2D(
+        [0],
+        [0],
+        marker="s",
+        color="tab:blue",
+        markersize=10,
+        linestyle="None",
+        alpha=0.5,
+        label="CP4SBI region",
+    ),
+    Line2D(
+        [0],
+        [0],
+        marker="o",
+        color="black",
+        linestyle="None",
+        markersize=6,
+        alpha=0.3,
+        label="Posterior Samples",
+    ),
+]
+
+# Display the legend outside the plot
+fig.legend(
+    handles=legend_elements,
+    loc="upper center",
+    bbox_to_anchor=(0.5, 1.0015),
+    ncol=4,
+    frameon=True,
+)
+plt.tight_layout(rect=[0, 0, 1, 0.93])  # leave space at the top for the legend
+fig.savefig("illustration_diffusion.pdf", format="pdf")
