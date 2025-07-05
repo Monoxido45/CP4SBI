@@ -12,6 +12,7 @@ from tqdm import tqdm
 import sbibm
 from copy import deepcopy
 from matplotlib.patches import Patch
+from matplotlib.legend import Legend
 
 import matplotlib.pyplot as plt
 
@@ -212,7 +213,7 @@ torch.manual_seed(125)
 torch.cuda.manual_seed(125)
 # first X_obs
 theta_real = torch.full((1, 10), 0.0)
-theta_real[0, 0] = 0.15
+theta_real[0, 0] = 0.25
 theta_real[0, 1] = 0.1
 
 theta_2d = theta_real[:, :2]
@@ -373,6 +374,7 @@ real_mask_obs = real_mask_obs.reshape(len(theta), len(theta))
 fig, (ax, ax_bar) = plt.subplots(
     1, 2, figsize=(16, 8), gridspec_kw={"width_ratios": [2, 1]}
 )
+plt.rcParams.update({"font.size": 14})
 
 # Barplot of MAE for each method
 mae_methods = [
@@ -385,8 +387,11 @@ ax_bar.bar(labels, maes, color=colors, edgecolor="black", alpha=0.5)
 ax_bar.set_ylabel("MAE (Coverage)")
 ax_bar.set_title("MAE of Coverage")
 ax_bar.set_ylim(0, max(maes) * 1.2)
+# Make "CP4SBI-CDF" label bold by looping through the labels
+for tick_label in ax_bar.get_xticklabels():
+    if tick_label.get_text() == "CP4SBI-CDF":
+        tick_label.set_fontweight("bold")
 ax_bar.set_xticklabels(labels, rotation=20)
-plt.rcParams.update({"font.size": 14})
 
 # Plot the oracle (real) region contour
 # Plot the contours for LOCART and all other methods, including the oracle
@@ -424,12 +429,13 @@ ax.contour(
 )
 
 # Add legend handles manually for clarity
+# Use plain text labels; color is indicated by the edgecolor of the Patch
 legend_elements = [
     Patch(
         facecolor="none",
         edgecolor="blue",
         linewidth=2,
-        label="CP4SBI-CDF",
+        label=r"$\mathbf{CP4SBI\text{-}CDF}$",
         alpha=0.75,
     ),
     Patch(
@@ -454,6 +460,16 @@ legend_elements = [
         alpha=0.75,
     ),
 ]
+# Add legend with colored text matching the edgecolor
+
+# Create legend with colored text
+legend = ax.legend(
+    handles=legend_elements,
+    loc="upper center",
+    bbox_to_anchor=(0.5, 1.15),
+    ncol=len(legend_elements),
+    frameon=False,
+)
 
 # Place the legend above the plot, beside the title, in a horizontal layout
 ax.legend(
@@ -466,12 +482,12 @@ ax.legend(
 ax.set_title("2D credible regions")
 ax.set_xlabel(r"$\theta_1$")
 ax.set_ylabel(r"$\theta_2$")
-ax.set_xlim(-0.5, 0.9)
+ax.set_xlim(-0.4, 1.0025)
 ax.set_ylim(-1.0025, 0.25)
 plt.tight_layout()
 plt.show()
 # Save the current figure as PDF
-fig.savefig("credible_regions_comparison.pdf", bbox_inches="tight")
+fig.savefig("credible_regions_comparison_2.pdf", bbox_inches="tight")
 
 
 # making confidence intervals for 1d

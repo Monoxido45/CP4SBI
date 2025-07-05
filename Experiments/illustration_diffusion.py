@@ -25,7 +25,6 @@ prior_NPE = BoxUniform(
     device=device,
 )
 
-
 ############################### Deriving the cutoffs for each method
 torch.manual_seed(75)
 torch.cuda.manual_seed(75)
@@ -84,10 +83,10 @@ bayes_conf.calib(
 post_estim = deepcopy(bayes_conf.locart.sbi_score.posterior)
 
 target_coverage = 0.9
-torch.manual_seed(45)
-torch.cuda.manual_seed(45)
+torch.manual_seed(145)
+torch.cuda.manual_seed(145)
 # first X_obs
-theta_real = torch.tensor([[0.25, -0.25]])
+theta_real = torch.tensor([[0.15, -0.1]])
 # generating X_obs
 X_obs = simulator(theta_real)
 
@@ -131,7 +130,7 @@ kde_true = -kde(true_post_samples.T)
 t_grid = np.arange(
     np.min(kde_true),
     np.max(kde_true),
-    0.01,
+    0.001,
 )
 
 # computing MC integral for all t_grid
@@ -148,18 +147,19 @@ oracle_mask = -Z <= oracle_cutoff
 # computing coverage
 coverage = np.mean(kde_true <= locart_cutoff)
 coverage_naive = np.mean(kde_true <= naive_cutoff)
+coverage_oracle = np.mean(kde_true <= oracle_cutoff)
 print(f"Coverage of the credible region: {coverage:.3f}")
 print(f"Naive coverage: {coverage_naive:.3f}")
 
 # generating the panels
-fig, axs = plt.subplots(1, 3, figsize=(18, 6))
+fig, axs = plt.subplots(1, 3, figsize=(18, 8))
 plt.rcParams.update({"font.size": 14})
 
 # Panel 1: Scatter plot of posterior samples
 axs[0].scatter(
     posterior_samples[:, 0], posterior_samples[:, 1], alpha=0.3, s=8, color="black"
 )
-axs[0].set_title("Generated Posterior Samples")
+axs[0].set_title("Samples generated from estimated posterior")
 axs[0].set_xlabel(r"$\theta_1$")
 axs[0].set_ylabel(r"$\theta_2$")
 
@@ -209,9 +209,9 @@ axs[2].scatter(
 )
 # Add coverage as a text element in the panel
 axs[2].text(
-    0.015,
+    0.025,
     0.975,
-    f"CP4SBI Coverage: {coverage:.2f}",
+    f"CP4SBI ≈ {coverage:.2f}",
     transform=axs[2].transAxes,
     fontsize=10,
     verticalalignment="top",
@@ -219,9 +219,9 @@ axs[2].text(
 )
 
 axs[2].text(
-    0.3675,
+    0.425,
     0.975,
-    f"Oracle coverage: 0.9",
+    f"Oracle = 0.9",
     transform=axs[2].transAxes,
     fontsize=10,
     verticalalignment="top",
@@ -229,9 +229,9 @@ axs[2].text(
 )
 
 axs[2].text(
-    0.69,
+    0.8,
     0.975,
-    f"Naive Coverage: {coverage_naive:.2f}",
+    f"Naive ≈ {coverage_naive:.2f}",
     transform=axs[2].transAxes,
     fontsize=10,
     verticalalignment="top",
@@ -255,7 +255,7 @@ legend_elements = [
         markersize=10,
         linestyle="None",
         alpha=0.5,
-        label="CP4SBI region",
+        label=r"$\mathbf{CP4SBI\text{-}LOCART}$",
     ),
     Line2D(
         [0],
@@ -277,5 +277,6 @@ fig.legend(
     ncol=4,
     frameon=True,
 )
-plt.tight_layout(rect=[0, 0, 1, 0.93])  # leave space at the top for the legend
-fig.savefig("illustration_diffusion.pdf", format="pdf")
+plt.tight_layout(rect=[0, 0, 1, 0.93])
+plt.show()  # leave space at the top for the legend
+fig.savefig("illustration_diffusion_CP4SBI.pdf", format="pdf")
