@@ -200,7 +200,7 @@ axs[2].contourf(
     label="LOCART region",
 )
 axs[2].contour(X, Y, Z, levels=10, colors="k", linewidths=0.5, alpha=0.3)
-axs[2].set_title("Credible Region (CP4SBI-LOCART)")
+axs[2].set_title("Credible Region")
 axs[2].set_xlabel(r"$\theta_1$")
 axs[2].set_ylabel("")
 # Overlay scatter plot on credible region panel
@@ -211,7 +211,7 @@ axs[2].scatter(
 axs[2].text(
     0.025,
     0.975,
-    f"CP4SBI ≈ {coverage:.2f}",
+    r"$\mathbf{CP4SBI}$ = " + f"{coverage*100:.1f}%",
     transform=axs[2].transAxes,
     fontsize=10,
     verticalalignment="top",
@@ -219,9 +219,9 @@ axs[2].text(
 )
 
 axs[2].text(
-    0.425,
+    0.415,
     0.975,
-    f"Oracle = 0.9",
+    f"Oracle = 90.0%",
     transform=axs[2].transAxes,
     fontsize=10,
     verticalalignment="top",
@@ -229,9 +229,9 @@ axs[2].text(
 )
 
 axs[2].text(
-    0.8,
+    0.775,
     0.975,
-    f"Naive ≈ {coverage_naive:.2f}",
+    f"Naive = {coverage_naive*100:.1f}%",
     transform=axs[2].transAxes,
     fontsize=10,
     verticalalignment="top",
@@ -255,17 +255,7 @@ legend_elements = [
         markersize=10,
         linestyle="None",
         alpha=0.5,
-        label=r"$\mathbf{CP4SBI\text{-}LOCART}$",
-    ),
-    Line2D(
-        [0],
-        [0],
-        marker="o",
-        color="black",
-        linestyle="None",
-        markersize=6,
-        alpha=0.3,
-        label="Posterior Samples",
+        label=r"$\mathbf{\text{CP4SBI-LOCART}}$",
     ),
 ]
 
