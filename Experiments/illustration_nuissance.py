@@ -374,7 +374,7 @@ real_mask_obs = real_mask_obs.reshape(len(theta), len(theta))
 fig, (ax, ax_bar) = plt.subplots(
     1, 2, figsize=(16, 8), gridspec_kw={"width_ratios": [2, 1]}
 )
-plt.rcParams.update({"font.size": 14})
+plt.rcParams.update({"font.size": 16})
 
 # Barplot of MAE for each method
 mae_methods = [

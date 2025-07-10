@@ -153,7 +153,7 @@ print(f"Naive coverage: {coverage_naive:.3f}")
 
 # generating the panels
 fig, axs = plt.subplots(1, 3, figsize=(18, 8))
-plt.rcParams.update({"font.size": 14})
+plt.rcParams.update({"font.size": 16})
 
 # Panel 1: Scatter plot of posterior samples
 axs[0].scatter(
@@ -213,27 +213,27 @@ axs[2].text(
     0.975,
     r"$\mathbf{CP4SBI}$ = " + f"{coverage*100:.1f}%",
     transform=axs[2].transAxes,
-    fontsize=10,
+    fontsize=12,
     verticalalignment="top",
     bbox=dict(boxstyle="round,pad=0.3", facecolor="tab:blue", alpha=0.5),
 )
 
 axs[2].text(
-    0.415,
+    0.395,
     0.975,
     f"Oracle = 90.0%",
     transform=axs[2].transAxes,
-    fontsize=10,
+    fontsize=12,
     verticalalignment="top",
     bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.5),
 )
 
 axs[2].text(
-    0.775,
+    0.735,
     0.975,
     f"Naive = {coverage_naive*100:.1f}%",
     transform=axs[2].transAxes,
-    fontsize=10,
+    fontsize=12,
     verticalalignment="top",
     bbox=dict(boxstyle="round,pad=0.3", facecolor="red", alpha=0.5),
 )
@@ -255,7 +255,7 @@ legend_elements = [
         markersize=10,
         linestyle="None",
         alpha=0.5,
-        label=r"$\mathbf{\text{CP4SBI-LOCART}}$",
+        label=r"$\mathbf{CP4SBI\text{-}LOCART}$",
     ),
 ]
 
