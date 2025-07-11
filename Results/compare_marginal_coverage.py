@@ -3,10 +3,11 @@ import torch
 from sbi.utils import BoxUniform
 from sbi.inference import NPE, NPSE
 from CP4SBI.baycon import BayCon
-from CP4SBI.scores import HPDScore, WALDOScore
+from CP4SBI.scores import HPDScore, WALDOScore, KDE_HPDScore
 from sbi.utils.user_input_checks import process_prior
 from sbi.utils import MultipleIndependent
 from CP4SBI.utils import naive_method, hdr_method
+from scipy.stats import gaussian_kde
 
 # for benchmarking
 import sbibm
@@ -187,7 +188,7 @@ if task_name != "gaussian_mixture":
 else:
     from CP4SBI.gmm_task import GaussianMixture
 
-    task = GaussianMixture(dim=2, prior_bound=4.0)
+    task = GaussianMixture(dim=2, prior_bound=3.0)
     simulator = task.get_simulator()
     prior = task.get_prior()
 
@@ -249,8 +250,8 @@ elif task_name == "bernoulli_glm" or "bernoulli_glm_raw":
     prior_NPE, _, _ = process_prior(prior_dist)
 elif task_name == "gaussian_mixture":
     prior_NPE = BoxUniform(
-        low=-4 * torch.ones(2),
-        high=4 * torch.ones(2),
+        low=-3 * torch.ones(2),
+        high=3 * torch.ones(2),
         device=device,
     )
 
@@ -385,6 +386,10 @@ def compute_coverage(
         score_used = HPDScore
     elif score_type == "WALDO":
         score_used = WALDOScore
+        kde_use = False
+    elif score_type == "KDE":
+        score_used = KDE_HPDScore
+        kde_use = True
 
     print("Computing conformal scores")
     cdf_conf = BayCon(
@@ -506,35 +511,50 @@ def compute_coverage(
         using_res=True,
     )
 
-    post_estim = deepcopy(bayes_conf.locart.sbi_score.posterior)
-
-    # HDR recalibration
-    print("Fitting HDR recalibration")
-    hdr_cutoff, hdr_obj = hdr_method(
-        post_estim=inference,
-        X_calib=X_calib,
-        thetas_calib=thetas_calib,
-        n_grid=1000,
-        X_test=X_test,
-        is_fitted=True,
-        alpha=alpha,
-        score_type=score_type,
-        device=device,
-    )
-
-    locart_cutoff = bayes_conf.predict_cutoff(X_test)
-    global_cutoff = global_conf.predict_cutoff(X_test)
-    cdf_cutoff = cdf_conf.predict_cutoff(X_test)
-    local_cdf_cutoff = local_cdf_conf.predict_cutoff(X_test)
-    alocart_cutoff = w_bayes_conf.predict_cutoff(X_test)
-
     coverage_locart = np.zeros(X_test.shape[0])
     coverage_global = np.zeros(X_test.shape[0])
     coverage_naive = np.zeros(X_test.shape[0])
     coverage_cdf = np.zeros(X_test.shape[0])
     coverage_local_cdf = np.zeros(X_test.shape[0])
     coverage_a_locart = np.zeros(X_test.shape[0])
+
+    post_estim = deepcopy(bayes_conf.locart.sbi_score.posterior)
     coverage_hdr = np.zeros(X_test.shape[0])
+
+    # HDR recalibration
+    print("Fitting HDR recalibration")
+    if score_type == "HPD" or score_type == "KDE":
+        hdr_cutoff, hdr_obj = hdr_method(
+            post_estim=inference,
+            X_calib=X_calib,
+            thetas_calib=thetas_calib,
+            n_grid=1000,
+            X_test=X_test,
+            is_fitted=True,
+            alpha=alpha,
+            score_type="HPD",
+            device=device,
+            kde=kde_use,
+        )
+    elif score_type == "WALDO":
+        hdr_cutoff, hdr_obj, mean_list, inv_matrix_list = hdr_method(
+            post_estim=inference,
+            X_calib=X_calib,
+            thetas_calib=thetas_calib,
+            n_grid=1000,
+            X_test=X_test,
+            is_fitted=True,
+            alpha=alpha,
+            score_type=score_type,
+            device=device,
+            kde=kde_use,
+        )
+
+    locart_cutoff = bayes_conf.predict_cutoff(X_test)
+    global_cutoff = global_conf.predict_cutoff(X_test)
+    cdf_cutoff = cdf_conf.predict_cutoff(X_test)
+    local_cdf_cutoff = local_cdf_conf.predict_cutoff(X_test)
+    alocart_cutoff = w_bayes_conf.predict_cutoff(X_test)
 
     # computing conf scores for each X_0 and theta_0
     conf_scores = cdf_conf.cdf_split.sbi_score.compute(X_test, thetas_test)
@@ -550,36 +570,35 @@ def compute_coverage(
         if len(theta_0.shape) == 1:
             theta_0 = theta_0.reshape(1, -1)
 
-        # sampling for compute marginal coverage for hdr
         theta_s = post_estim.sample(
             (1000,),
             x=X_0.to(device=device),
             show_progress_bars=False,
         )
 
-        new_conf_scores = -np.exp(
-            post_estim.log_prob(
-                theta_s.to(device=device),
-                x=X_0.to(device=device),
-            )
-            .cpu()
-            .numpy()
-        )
-
-        # recalibrating sample
-        _, dens_samples = hdr_obj.recal_sample(
-            y_hat=theta_s.cpu().reshape(
-                1,
-                theta_s.shape[0],
-                theta_s.shape[1],
-            ),
-            f_hat_y_hat=-new_conf_scores.reshape(1, -1),
-        )
-
-        hdr_conf_scores = -dens_samples[0, :]
-        coverage_hdr[i] = np.mean(hdr_conf_scores <= hdr_cutoff[i])
         if score_type == "HPD":
-            # computing naive cutoff
+            new_conf_scores = -np.exp(
+                post_estim.log_prob(
+                    theta_s.to(device=device),
+                    x=X_0.to(device=device),
+                )
+                .cpu()
+                .numpy()
+            )
+
+            # recalibrating sample
+            _, dens_samples = hdr_obj.recal_sample(
+                y_hat=theta_s.cpu().reshape(
+                    1,
+                    theta_s.shape[0],
+                    theta_s.shape[1],
+                ),
+                f_hat_y_hat=-new_conf_scores.reshape(1, -1),
+            )
+
+            hdr_conf_scores = -dens_samples[0, :]
+            coverage_hdr[i] = np.mean(hdr_conf_scores <= hdr_cutoff[i])
+
             if (
                 task_name == "sir"
                 or task_name == "lotka_volterra"
@@ -604,6 +623,67 @@ def compute_coverage(
                     B_naive=naive_samples,
                 )
             naive_cutoff[i] = closest_t
+
+        elif score_type == "KDE":
+            # computing naive cutoff
+            if (
+                task_name == "sir"
+                or task_name == "lotka_volterra"
+                or task_name == "gaussian_linear"
+            ):
+                closest_t = naive_method(
+                    post_estim,
+                    X=X_0,
+                    alpha=alpha,
+                    score_type="HPD",
+                    device=device,
+                    n_grid=1000,
+                    B_naive=naive_samples,
+                    kde=True,
+                )
+            else:
+                closest_t = naive_method(
+                    post_estim,
+                    X=X_0,
+                    alpha=alpha,
+                    score_type="HPD",
+                    device=device,
+                    B_naive=naive_samples,
+                    kde=True,
+                )
+            naive_cutoff[i] = closest_t
+
+            sample_generated = (
+                post_estim.sample(
+                    (1000,),
+                    x=X_0,
+                    show_progress_bars=False,
+                )
+                .cpu()
+                .detach()
+                .numpy()
+            )
+
+            #  fitting KDE
+            kde = gaussian_kde(sample_generated.T, bw_method="scott")
+
+            # computing log_prob for only one X
+            new_conf_scores = -kde(
+                theta_s.cpu().detach().numpy().T,
+            )
+
+            # computing scores for HDR
+            _, dens_samples = hdr_obj.recal_sample(
+                y_hat=theta_s.cpu().reshape(
+                    1,
+                    theta_s.shape[0],
+                    theta_s.shape[1],
+                ),
+                f_hat_y_hat=-new_conf_scores.reshape(1, -1),
+            )
+
+            hdr_conf_scores = -dens_samples[0, :]
+            coverage_hdr[i] = np.mean(hdr_conf_scores <= hdr_cutoff[i])
 
         # computing coverage
         coverage_locart[i] = (conf_scores[i] <= locart_cutoff[i]) + 0
@@ -653,7 +733,12 @@ def compute_coverage_repeated(
     coverage_results = []
 
     # Initialize a list to store checkpoints
-    checkpoint_path = os.path.join(original_path, "Results", "Marginal_results")
+    if base_model == "NPSE":
+        checkpoint_path = os.path.join(
+            original_path, "Results", f"Marginal_results_{base_model}"
+        )
+    else:
+        checkpoint_path = os.path.join(original_path, "Results", "Marginal_results")
     os.makedirs(checkpoint_path, exist_ok=True)
     checkpoint_file = os.path.join(
         checkpoint_path, f"{score_type}_{task_name}_checkpoints.pkl"
@@ -734,8 +819,14 @@ all_coverage_df = compute_coverage_repeated(
 )
 
 # Create the "MAE_results" folder if it doesn't exist for NPE
-mae_results_path = os.path.join(original_path, "Results", "Marginal_results")
-os.makedirs(mae_results_path, exist_ok=True)
+if base_model == "NPSE":
+    mae_results_path = os.path.join(
+        original_path, "Results", f"Marginal_results_{base_model}"
+    )
+    os.makedirs(mae_results_path, exist_ok=True)
+else:
+    mae_results_path = os.path.join(original_path, "Results", "Marginal_results")
+    os.makedirs(mae_results_path, exist_ok=True)
 
 
 # Save the all_coverage_df DataFrame to a CSV file
