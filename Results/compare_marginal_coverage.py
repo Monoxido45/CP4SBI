@@ -528,6 +528,7 @@ def compute_coverage(
             post_estim=inference,
             X_calib=X_calib,
             thetas_calib=thetas_calib,
+            res=res,
             n_grid=1000,
             X_test=X_test,
             is_fitted=True,

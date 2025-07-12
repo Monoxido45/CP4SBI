@@ -499,6 +499,7 @@ def hdr_method(
     X_calib,
     thetas_calib,
     X_test,
+    res=None,
     X_train=None,
     theta_train=None,
     alpha=0.1,
@@ -529,8 +530,11 @@ def hdr_method(
         )
         bayes_score.fit(X_train, theta_train)
 
-    # first, computing the probability of each observed samples
-    prob_array_calib = -bayes_score.compute(X_calib, thetas_calib)
+    if res is not None:
+        prob_array_calib = res
+    else:
+        # first, computing the probability of each observed samples
+        prob_array_calib = -bayes_score.compute(X_calib, thetas_calib)
 
     # computing log_prob for generated samples
     print("Computing log probabilities for sampled data from posterior")
