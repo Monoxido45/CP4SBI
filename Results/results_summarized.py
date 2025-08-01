@@ -19,17 +19,33 @@ files_hpd = [f for f in glob.glob(file_pattern)]
 file_pattern_npse = os.path.join(folder_path_npse, "*KDE*summary*.csv")
 files_hpd_npse = [f for f in glob.glob(file_pattern_npse)]
 
+file_pattern_seq = os.path.join(folder_path_seq, "*HPD*summary*.csv")
+files_hpd_seq = [f for f in glob.glob(file_pattern_seq)]
 
-def create_heat_matrix(files, name="NPE"):
+# defining folder paths for marginal coverage
+folder_path_marginal_npe = os.path.join(original_path, "Results/Marginal_results")
+folder_path_marginal_npse = os.path.join(original_path, "Results/Marginal_results_NPSE")
+
+file_pattern_marginal_npe = os.path.join(folder_path_marginal_npe, "*HPD*summary*.csv")
+files_hpd_marginal_npe = [f for f in glob.glob(file_pattern_marginal_npe)]
+
+file_pattern_marginal_npse = os.path.join(
+    folder_path_marginal_npse, "*KDE*summary*.csv"
+)
+files_hpd_marginal_npse = [f for f in glob.glob(file_pattern_marginal_npse)]
+
+
+def create_heat_matrix(files, name="NPE", type="MAE"):
     sim_matrix = {}
     mae_matrices, se_matrices = {}, {}
 
     # Extract simulation budget from file paths
-    simulation_budgets_lists = [
-        int(os.path.basename(file).split("_")[-1].split(".")[0]) for file in files
-    ]
+    if not name == "SNPE":
+        simulation_budgets_lists = [
+            int(os.path.basename(file).split("_")[-1].split(".")[0]) for file in files
+        ]
 
-    if name == "NPE":
+    if name == "NPE" and type == "MAE":
         file_dict = {
             10000: [
                 file
@@ -44,6 +60,16 @@ def create_heat_matrix(files, name="NPE"):
         }
 
         budgets = [10000, 20000]
+    elif name == "NPE" and type == "Marginal":
+        file_dict = {
+            10000: [
+                file
+                for file, budget in zip(files, simulation_budgets_lists)
+                if budget == 10000
+            ],
+        }
+
+        budgets = [10000]
     elif name == "NPSE":
         file_dict = {
             10000: [
@@ -52,6 +78,10 @@ def create_heat_matrix(files, name="NPE"):
                 if budget == 10000
             ]
         }
+
+        budgets = [10000]
+    elif name == "SNPE":
+        file_dict = {10000: [file for file in files]}
 
         budgets = [10000]
 
@@ -105,43 +135,59 @@ def create_heat_matrix(files, name="NPE"):
 
         # Determine significant values
         k = 0
-        for col in mae_matrix.columns:
-            significance_matrix.loc[:, col] = False  # Initialize with False
-            mae_values = mae_matrix.loc[:, col].to_numpy()
-            se_values = se_matrix.loc[:, col].to_numpy()
-            idxs = np.arange(0, len(mae_values))
+        if type == "MAE":
+            for col in mae_matrix.columns:
+                significance_matrix.loc[:, col] = False  # Initialize with False
+                mae_values = mae_matrix.loc[:, col].to_numpy()
+                se_values = se_matrix.loc[:, col].to_numpy()
+                idxs = np.arange(0, len(mae_values))
 
-            # Finding best index
-            best_method_index = np.argmin(mae_values)
-            if not np.isscalar(best_method_index):
-                best_method_index = best_method_index[0]
+                # Finding best index
+                best_method_index = np.argmin(mae_values)
+                if not np.isscalar(best_method_index):
+                    best_method_index = best_method_index[0]
 
-            significance_matrix.iloc[best_method_index, k] = True
+                significance_matrix.iloc[best_method_index, k] = True
 
-            # obtaining other best methods
-            excluded_mae_array = np.delete(
-                mae_values,
-                best_method_index,
-            )
+                # obtaining other best methods
+                excluded_mae_array = np.delete(
+                    mae_values,
+                    best_method_index,
+                )
 
-            excluded_se_array = np.delete(
-                se_values,
-                best_method_index,
-            )
+                excluded_se_array = np.delete(
+                    se_values,
+                    best_method_index,
+                )
 
-            excluded_idxs_array = np.delete(
-                idxs,
-                best_method_index,
-            )
+                excluded_idxs_array = np.delete(
+                    idxs,
+                    best_method_index,
+                )
 
-            lim_sup = mae_values[best_method_index] + se_values[best_method_index]
-            lim_inf = excluded_mae_array - excluded_se_array
+                lim_sup = mae_values[best_method_index] + se_values[best_method_index]
+                lim_inf = excluded_mae_array - excluded_se_array
 
-            add_indexes = np.where(lim_sup >= lim_inf)[0]
-            if add_indexes.size > 0:
-                selected_indexes = excluded_idxs_array[add_indexes]
-                significance_matrix.iloc[selected_indexes, k] = True
-            k += 1
+                add_indexes = np.where(lim_sup >= lim_inf)[0]
+                if add_indexes.size > 0:
+                    selected_indexes = excluded_idxs_array[add_indexes]
+                    significance_matrix.iloc[selected_indexes, k] = True
+                k += 1
+        else:
+            # Heatmatrix for marginal coverage
+            for col in se_matrix.columns:
+                significance_matrix.loc[:, col] = False  # Initialize with False
+                marginal_values = mae_matrix.loc[:, col].to_numpy()
+                se_values = se_matrix.loc[:, col].to_numpy()
+                idxs = np.arange(0, len(marginal_values))
+
+                # Finding methods passing marginal coverage
+                method_idxs = np.where(
+                    (np.round(marginal_values + se_values, 2) >= 0.9)
+                    & (np.round(marginal_values - se_values, 2) <= 0.9)
+                )[0]
+                significance_matrix.iloc[method_idxs, k] = True
+                k += 1
 
         significance_matrix.columns = benchmark_names
         se_matrix.columns = benchmark_names
@@ -237,7 +283,7 @@ def create_heat_matrix(files, name="NPE"):
         plt.tight_layout()
         # Save the figure to the specified path
         output_path = os.path.join(
-            original_path, "Results", f"{name}_heatmap_figure.png"
+            original_path, "Results", f"{name}_heatmap_figure_{type}.png"
         )
         output_path_pdf = os.path.splitext(output_path)[0] + ".pdf"
         fig.savefig(output_path_pdf, format="pdf")
@@ -301,7 +347,7 @@ def create_heat_matrix(files, name="NPE"):
 
         plt.tight_layout()
         output_path = os.path.join(
-            original_path, "Results", f"{name}_heatmap_figure.png"
+            original_path, "Results", f"{name}_heatmap_figure_{type}.png"
         )
         output_path_pdf = os.path.splitext(output_path)[0] + ".pdf"
         fig.savefig(output_path_pdf, format="pdf")
@@ -319,6 +365,23 @@ sim_mat, mae_mat, se_mat = create_heat_matrix(
 sim_mat_npse, mae_mat_npse, se_mat_npse = create_heat_matrix(
     files_hpd_npse,
     name="NPSE",
+)
+
+sim_mat_seq, mae_mat_seq, se_mat_seq = create_heat_matrix(
+    files_hpd_seq,
+    name="SNPE",
+)
+
+sim_mat_marginal, mae_mat_marginal, se_mat_marginal = create_heat_matrix(
+    files_hpd_marginal_npe,
+    name="NPE",
+    type="Marginal",
+)
+
+sim_mat_marginal_npse, mae_mat_marginal_npse, se_mat_marginal_npse = create_heat_matrix(
+    files_hpd_marginal_npse,
+    name="NPSE",
+    type="Marginal",
 )
 
 
