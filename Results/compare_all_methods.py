@@ -87,7 +87,7 @@ parser.add_argument(
     "-p_calib",
     help="float between 0 and 1 for proportion of calibration data",
     default=0.2,
-    type=int,
+    type=float,
 )
 
 parser.add_argument(
@@ -114,6 +114,14 @@ parser.add_argument(
     type=str,
 )
 
+parser.add_argument(
+    "--min_samples_leaf",
+    "-m_s_l",
+    help="int for minimum number of samples in leaf for local methods",
+    default=300,
+    type=int,
+)
+
 original_path = os.getcwd()
 if __name__ == "__main__":
     args = parser.parse_args()  # get arguments from command line
@@ -131,6 +139,7 @@ X_str = args.X_list == "True"
 num_obs = args.n_x
 sample_with = args.sample_with
 base_model = args.base_model
+min_samples_leaf = args.min_samples_leaf
 
 if X_str:
     # Load the X_list pickle file from the X_data folder
@@ -850,7 +859,7 @@ all_coverage_df = compute_coverage_repeated(
     task_name=task_name,
     device=device,
     central_seed=seed,
-    min_samples_leaf=300,
+    min_samples_leaf=min_samples_leaf,
     naive_samples=1000,
     n_rep=n_rep,
     sample_with=sample_with,
