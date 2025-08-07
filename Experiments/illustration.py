@@ -16,6 +16,7 @@ from CP4SBI.utils import naive_method
 # testing naive
 import sbibm
 from matplotlib.lines import Line2D
+from matplotlib.colors import LinearSegmentedColormap
 
 original_path = os.getcwd()
 device = "cuda"
@@ -228,7 +229,7 @@ plt.rcParams.update({"font.size": 14})
 
 # Add subtitles for the LOCART plots
 axes[0, 0].annotate(
-    "First Observation",
+    "First Observation: (0.1, -0.3)",
     xy=(0.1, 1.15),
     xycoords="axes fraction",
     fontsize=18,
@@ -240,7 +241,7 @@ axes[0, 0].annotate(
 
 axes[1, 0].set_title("", loc="left")
 axes[1, 0].annotate(
-    "Second Observation",
+    "Second Observation: (-0.3, 0.7)",
     xy=(0.15, 1.15),
     xycoords="axes fraction",
     fontsize=18,
@@ -259,11 +260,18 @@ axes[0, 0].contour(
     colors="black",
     linewidths=1.5,
 )
+# Create a custom colormap with white as the lowest value and blue as the highest
+white_blue_cmap = LinearSegmentedColormap.from_list("white_blue", ["white", "blue"])
+# Create custom colormaps for each method
+white_green_cmap = LinearSegmentedColormap.from_list("white_green", ["white", "green"])
+white_red_cmap = LinearSegmentedColormap.from_list("white_red", ["white", "red"])
+
+# Use custom colormaps for the first row
 axes[0, 0].imshow(
     locart_mask_obs1.T,
     extent=(-1, 1, -1, 1),
     origin="lower",
-    cmap="Blues",
+    cmap=white_blue_cmap,
     alpha=0.6,
 )
 axes[0, 0].set_title("LOCART (our approach)", fontweight="bold", color="blue")
@@ -280,13 +288,15 @@ axes[0, 1].contour(
     colors="black",
     linewidths=1.5,
 )
+
 axes[0, 1].imshow(
     global_mask_obs1.T,
     extent=(-1, 1, -1, 1),
     origin="lower",
-    cmap="Greens",
+    cmap=white_green_cmap,
     alpha=0.6,
 )
+
 axes[0, 1].set_title("Global CP", color="green")
 axes[0, 1].set_xlabel("")
 axes[0, 1].set_ylabel("")
@@ -305,7 +315,7 @@ axes[0, 2].imshow(
     naive_mask_obs1.T,
     extent=(-1, 1, -1, 1),
     origin="lower",
-    cmap="Reds",
+    cmap=white_red_cmap,
     alpha=0.6,
 )
 axes[0, 2].set_title("Naive", color="red")
@@ -326,7 +336,7 @@ axes[1, 0].imshow(
     locart_mask_obs2.T,
     extent=(-1, 1, -1, 1),
     origin="lower",
-    cmap="Blues",
+    cmap=white_blue_cmap,
     alpha=0.6,
 )
 axes[1, 0].set_title("")
@@ -347,7 +357,7 @@ axes[1, 1].imshow(
     global_mask_obs2.T,
     extent=(-1, 1, -1, 1),
     origin="lower",
-    cmap="Greens",
+    cmap=white_green_cmap,
     alpha=0.6,
 )
 axes[1, 1].set_title("")
@@ -368,7 +378,7 @@ axes[1, 2].imshow(
     naive_mask_obs2.T,
     extent=(-1, 1, -1, 1),
     origin="lower",
-    cmap="Reds",
+    cmap=white_red_cmap,
     alpha=0.6,
 )
 axes[1, 2].set_title("")

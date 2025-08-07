@@ -35,7 +35,14 @@ file_pattern_marginal_npse = os.path.join(
 files_hpd_marginal_npse = [f for f in glob.glob(file_pattern_marginal_npse)]
 
 
-def create_heat_matrix(files, name="NPE", type="MAE"):
+def create_heat_matrix(
+    files,
+    name="NPE",
+    type="MAE",
+    files_marginal=None,
+    one_budget=False,
+    sel_budget=10000,
+):
     sim_matrix = {}
     mae_matrices, se_matrices = {}, {}
 
@@ -44,6 +51,11 @@ def create_heat_matrix(files, name="NPE", type="MAE"):
         simulation_budgets_lists = [
             int(os.path.basename(file).split("_")[-1].split(".")[0]) for file in files
         ]
+        if type == "MAE and Marginal":
+            simulation_budgets_lists_marginal = [
+                int(os.path.basename(file).split("_")[-1].split(".")[0])
+                for file in files_marginal
+            ]
 
     if name == "NPE" and type == "MAE":
         file_dict = {
@@ -60,6 +72,23 @@ def create_heat_matrix(files, name="NPE", type="MAE"):
         }
 
         budgets = [10000, 20000]
+    elif name == "NPE" and type == "MAE and Marginal":
+        file_dict = {
+            "Conditional MAE": [
+                file
+                for file, budget in zip(files, simulation_budgets_lists)
+                if budget == 10000
+            ],
+            "Marginal Coverage": [
+                file
+                for file, budget in zip(
+                    files_marginal, simulation_budgets_lists_marginal
+                )
+                if budget == 10000
+            ],
+        }
+
+        budgets = [10000, 10000]  # Same budget for both types
     elif name == "NPE" and type == "Marginal":
         file_dict = {
             10000: [
@@ -70,7 +99,7 @@ def create_heat_matrix(files, name="NPE", type="MAE"):
         }
 
         budgets = [10000]
-    elif name == "NPSE":
+    elif name == "NPSE" and type == "MAE":
         file_dict = {
             10000: [
                 file
@@ -86,6 +115,7 @@ def create_heat_matrix(files, name="NPE", type="MAE"):
         budgets = [10000]
 
     j = 0
+    keys = list(file_dict.keys())
     for file_list in file_dict.values():
         # Initialize a dictionary to store counts for each method per benchmark
         heat_matrix = {}
@@ -94,6 +124,8 @@ def create_heat_matrix(files, name="NPE", type="MAE"):
         # Initialize a DataFrame to store MAE values for visualization
         mae_matrix = pd.DataFrame(columns=heat_matrix.keys())
         se_matrix = pd.DataFrame(columns=heat_matrix.keys())
+
+        print("Computing significance matrices:")
 
         for file in file_list:
             # extracting benchmark name from file name
@@ -135,7 +167,7 @@ def create_heat_matrix(files, name="NPE", type="MAE"):
 
         # Determine significant values
         k = 0
-        if type == "MAE":
+        if type == "MAE" or keys[j] == "Conditional MAE":
             for col in mae_matrix.columns:
                 significance_matrix.loc[:, col] = False  # Initialize with False
                 mae_values = mae_matrix.loc[:, col].to_numpy()
@@ -173,7 +205,7 @@ def create_heat_matrix(files, name="NPE", type="MAE"):
                     selected_indexes = excluded_idxs_array[add_indexes]
                     significance_matrix.iloc[selected_indexes, k] = True
                 k += 1
-        else:
+        elif type == "Marginal" or keys[j] == "Marginal Coverage":
             # Heatmatrix for marginal coverage
             for col in se_matrix.columns:
                 significance_matrix.loc[:, col] = False  # Initialize with False
@@ -197,88 +229,173 @@ def create_heat_matrix(files, name="NPE", type="MAE"):
         mae_matrix.index = column_names
         se_matrix.index = column_names
 
-        sim_matrix[budgets[j]] = significance_matrix
-        mae_matrices[budgets[j]] = mae_matrix
-        se_matrices[budgets[j]] = se_matrix
+        if not type == "MAE and Marginal":
+            sim_matrix[budgets[j]] = significance_matrix
+            mae_matrices[budgets[j]] = mae_matrix
+            se_matrices[budgets[j]] = se_matrix
+        else:
+            sim_matrix[keys[j]] = significance_matrix
+            mae_matrices[keys[j]] = mae_matrix
+            se_matrices[keys[j]] = se_matrix
 
         j += 1
 
+    print("Producing heatmap:")
     # producing the heatmap
-    plt.rcParams.update({"font.size": 14})
-    if len(budgets) > 1:
-        fig, axes = plt.subplots(1, len(budgets), figsize=(18, 8))
-        for idx, budget in enumerate(budgets):
-            ax = axes[idx]
-            mae_matrix = mae_matrices[budget]
-            se_matrix = se_matrices[budget]
-            significance_matrix = sim_matrix[budget]
+    plt.rcParams.update({"font.size": 16})
+    if len(budgets) > 1 or type == "MAE and Marginal":
+        fig, axes = plt.subplots(1, len(budgets), figsize=(16, 9))
 
-            # Define a discrete colormap with two colors: green for significant, white for not significant
-            cmap = ListedColormap(["white", "mediumseagreen"])  # Light green color
+        if not type == "MAE and Marginal":
+            for idx, budget in enumerate(budgets):
+                ax = axes[idx]
+                mae_matrix = mae_matrices[budget]
+                se_matrix = se_matrices[budget]
+                significance_matrix = sim_matrix[budget]
 
-            sorted_benchmark_names = sorted(benchmark_names)
+                # Define a discrete colormap with two colors: green for significant, white for not significant
+                cmap = ListedColormap(["white", "mediumseagreen"])  # Light green color
 
-            # Define the desired order for specific columns
-            desired_order = ["LOCART", "CDF", "L-CDF"]
-            remaining_columns = [
-                col for col in column_names if col not in desired_order
-            ]
-            ordered_columns = desired_order + remaining_columns
+                sorted_benchmark_names = sorted(benchmark_names)
 
-            # Reorder the columns (benchmarks) based on the sorted benchmark names
-            mae_matrix = mae_matrix[sorted_benchmark_names]
-            se_matrix = se_matrix[sorted_benchmark_names]
-            significance_matrix = significance_matrix[sorted_benchmark_names]
+                # Define the desired order for specific columns
+                desired_order = ["LOCART", "CDF", "L-CDF"]
+                remaining_columns = [
+                    col for col in column_names if col not in desired_order
+                ]
+                ordered_columns = desired_order + remaining_columns
 
-            # Reorder the rows (methods) based on the desired order
-            mae_matrix = mae_matrix.loc[ordered_columns]
-            se_matrix = se_matrix.loc[ordered_columns]
-            significance_matrix = significance_matrix.loc[ordered_columns]
+                # Reorder the columns (benchmarks) based on the sorted benchmark names
+                mae_matrix = mae_matrix[sorted_benchmark_names]
+                se_matrix = se_matrix[sorted_benchmark_names]
+                significance_matrix = significance_matrix[sorted_benchmark_names]
 
-            # Create a matrix for coloring based on significance
-            color_matrix = significance_matrix.replace({False: 0, True: 1}).to_numpy()
+                # Reorder the rows (methods) based on the desired order
+                mae_matrix = mae_matrix.loc[ordered_columns]
+                se_matrix = se_matrix.loc[ordered_columns]
+                significance_matrix = significance_matrix.loc[ordered_columns]
 
-            # Plot the heatmap with the discrete colormap
-            heatmap = ax.imshow(color_matrix, cmap=cmap, aspect="auto")
+                # Create a matrix for coloring based on significance
+                color_matrix = significance_matrix.replace(
+                    {False: 0, True: 1}
+                ).to_numpy()
 
-            # Add gridlines to separate tiles
-            ax.set_xticks(np.arange(-0.5, len(mae_matrix.columns), 1), minor=True)
-            ax.set_yticks(np.arange(-0.5, len(mae_matrix.index), 1), minor=True)
-            ax.grid(which="minor", color="black", linestyle="-", linewidth=0.5)
-            ax.tick_params(which="minor", bottom=False, left=False)
+                # Plot the heatmap with the discrete colormap
+                heatmap = ax.imshow(color_matrix, cmap=cmap, aspect="auto")
 
-            # Add text (MAE and SE values) to each tile
-            for i in range(mae_matrix.shape[0]):
-                for j in range(mae_matrix.shape[1]):
-                    value = mae_matrix.iloc[i, j]
-                    se_value = se_matrix.iloc[i, j]
-                    ax.text(
-                        j,
-                        i,
-                        f"{value:.3f}\n({se_value:.4f})",
-                        ha="center",
-                        va="center",
-                        color="black",
-                        fontsize=10,
-                    )
+                # Add gridlines to separate tiles
+                ax.set_xticks(np.arange(-0.5, len(mae_matrix.columns), 1), minor=True)
+                ax.set_yticks(np.arange(-0.5, len(mae_matrix.index), 1), minor=True)
+                ax.grid(which="minor", color="black", linestyle="-", linewidth=0.5)
+                ax.tick_params(which="minor", bottom=False, left=False)
 
-            # Set axis labels and ticks
-            ax.set_xlabel("Benchmarks")
-            if idx == 0:
-                ax.set_ylabel("Methods")
-            else:
-                ax.set_ylabel("")
+                # Add text (MAE and SE values) to each tile
+                for i in range(mae_matrix.shape[0]):
+                    for j in range(mae_matrix.shape[1]):
+                        value = mae_matrix.iloc[i, j]
+                        se_value = se_matrix.iloc[i, j]
+                        ax.text(
+                            j,
+                            i,
+                            f"{value:.3f}\n({se_value:.3f})",
+                            ha="center",
+                            va="center",
+                            color="black",
+                            fontsize=13,
+                        )
 
-            ax.set_xticks(range(len(mae_matrix.columns)))
-            ax.set_xticklabels(mae_matrix.columns, rotation=45, ha="right")
+                # Set axis labels and ticks
+                ax.set_xlabel("Benchmarks")
+                if idx == 0:
+                    ax.set_ylabel("Methods")
+                else:
+                    ax.set_ylabel("")
 
-            ax.tick_params(axis="x", labelsize=10)
-            ax.set_yticks(range(len(mae_matrix.index)))
-            ax.set_yticklabels(mae_matrix.index)
-            for tick, label in zip(ax.get_yticklabels(), mae_matrix.index):
-                if label in ["LOCART", "CDF", "L-CDF"]:
-                    tick.set_fontweight("bold")
-            ax.set_title(f"Budget: {budget}")
+                ax.set_xticks(range(len(mae_matrix.columns)))
+                ax.set_xticklabels(mae_matrix.columns, rotation=45, ha="right")
+
+                ax.tick_params(axis="x", labelsize=16)
+                ax.set_yticks(range(len(mae_matrix.index)))
+                ax.set_yticklabels(mae_matrix.index)
+                for tick, label in zip(ax.get_yticklabels(), mae_matrix.index):
+                    if label in ["LOCART", "CDF", "L-CDF"]:
+                        tick.set_fontweight("bold")
+                ax.set_title(f"Budget: {budget}")
+        else:
+            for idx, kind in enumerate(keys):
+                ax = axes[idx]
+                mae_matrix = mae_matrices[kind]
+                se_matrix = se_matrices[kind]
+                significance_matrix = sim_matrix[kind]
+
+                # Define a discrete colormap with two colors: green for significant, white for not significant
+                cmap = ListedColormap(["white", "mediumseagreen"])
+
+                sorted_benchmark_names = sorted(benchmark_names)
+
+                # Define the desired order for specific columns
+                desired_order = ["LOCART", "CDF", "L-CDF"]
+                remaining_columns = [
+                    col for col in column_names if col not in desired_order
+                ]
+                ordered_columns = desired_order + remaining_columns
+
+                # Reorder the columns (benchmarks) based on the sorted benchmark names
+                mae_matrix = mae_matrix[sorted_benchmark_names]
+                se_matrix = se_matrix[sorted_benchmark_names]
+                significance_matrix = significance_matrix[sorted_benchmark_names]
+
+                # Reorder the rows (methods) based on the desired order
+                mae_matrix = mae_matrix.loc[ordered_columns]
+                se_matrix = se_matrix.loc[ordered_columns]
+                significance_matrix = significance_matrix.loc[ordered_columns]
+
+                # Create a matrix for coloring based on significance
+                color_matrix = significance_matrix.replace(
+                    {False: 0, True: 1}
+                ).to_numpy()
+
+                # Plot the heatmap with the discrete colormap
+                heatmap = ax.imshow(color_matrix, cmap=cmap, aspect="auto")
+
+                # Add gridlines to separate tiles
+                ax.set_xticks(np.arange(-0.5, len(mae_matrix.columns), 1), minor=True)
+                ax.set_yticks(np.arange(-0.5, len(mae_matrix.index), 1), minor=True)
+                ax.grid(which="minor", color="black", linestyle="-", linewidth=0.5)
+                ax.tick_params(which="minor", bottom=False, left=False)
+
+                # Add text (MAE and SE values) to each tile
+                for i in range(mae_matrix.shape[0]):
+                    for j in range(mae_matrix.shape[1]):
+                        value = mae_matrix.iloc[i, j]
+                        se_value = se_matrix.iloc[i, j]
+                        ax.text(
+                            j,
+                            i,
+                            f"{value:.3f}\n({se_value:.3f})",
+                            ha="center",
+                            va="center",
+                            color="black",
+                            fontsize=13,
+                        )
+
+                # Set axis labels and ticks
+                ax.set_xlabel("Benchmarks")
+                if idx == 0:
+                    ax.set_ylabel("Methods")
+                else:
+                    ax.set_ylabel("")
+
+                ax.set_xticks(range(len(mae_matrix.columns)))
+                ax.set_xticklabels(mae_matrix.columns, rotation=45, ha="right")
+
+                ax.tick_params(axis="x", labelsize=16)
+                ax.set_yticks(range(len(mae_matrix.index)))
+                ax.set_yticklabels(mae_matrix.index)
+                for tick, label in zip(ax.get_yticklabels(), mae_matrix.index):
+                    if label in ["LOCART", "CDF", "L-CDF"]:
+                        tick.set_fontweight("bold")
+                ax.set_title(f"{kind}")
 
         plt.tight_layout()
         # Save the figure to the specified path
@@ -326,18 +443,18 @@ def create_heat_matrix(files, name="NPE", type="MAE"):
                 ax.text(
                     j,
                     i,
-                    f"{value:.3f}\n({se_value:.4f})",
+                    f"{value:.3f}\n({se_value:.3f})",
                     ha="center",
                     va="center",
                     color="black",
-                    fontsize=10,
+                    fontsize=13,
                 )
 
         ax.set_xlabel("Benchmarks")
         ax.set_ylabel("Methods")
         ax.set_xticks(range(len(mae_matrix.columns)))
         ax.set_xticklabels(mae_matrix.columns, rotation=45, ha="right")
-        ax.tick_params(axis="x", labelsize=10)
+        ax.tick_params(axis="x", labelsize=16)
         ax.set_yticks(range(len(mae_matrix.index)))
         ax.set_yticklabels(mae_matrix.index)
         for tick, label in zip(ax.get_yticklabels(), mae_matrix.index):
@@ -359,6 +476,8 @@ def create_heat_matrix(files, name="NPE", type="MAE"):
 sim_mat, mae_mat, se_mat = create_heat_matrix(
     files_hpd,
     name="NPE",
+    type="MAE and Marginal",
+    files_marginal=files_hpd_marginal_npe,
 )
 
 # For NPSE files

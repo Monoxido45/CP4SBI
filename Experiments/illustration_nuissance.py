@@ -483,7 +483,7 @@ ax.set_title("2D credible regions")
 ax.set_xlabel(r"$\theta_1$")
 ax.set_ylabel(r"$\theta_2$")
 ax.set_xlim(-0.4, 1.0025)
-ax.set_ylim(-1.0025, 0.25)
+ax.set_ylim(-1.025, 0.25)
 plt.tight_layout()
 plt.show()
 # Save the current figure as PDF
