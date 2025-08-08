@@ -57,7 +57,7 @@ def create_heat_matrix(
                 for file in files_marginal
             ]
 
-    if name == "NPE" and type == "MAE":
+    if name == "NPE" and type == "MAE" and not one_budget:
         file_dict = {
             10000: [
                 file
@@ -72,7 +72,7 @@ def create_heat_matrix(
         }
 
         budgets = [10000, 20000]
-    elif name == "NPE" and type == "MAE and Marginal":
+    elif name in ["NPE", "NPSE"] and type == "MAE and Marginal":
         file_dict = {
             "Conditional MAE": [
                 file
@@ -89,6 +89,19 @@ def create_heat_matrix(
         }
 
         budgets = [10000, 10000]  # Same budget for both types
+    elif name in ["NPE", "NPSE"] and one_budget:
+        print("One budget selected for NPE/NPSE")
+        file_dict = {
+            sel_budget: [
+                file
+                for file, budget in zip(files, simulation_budgets_lists)
+                if budget == int(sel_budget)
+            ]
+        }
+        print(file_dict)
+
+        budgets = [sel_budget]
+
     elif name == "NPE" and type == "Marginal":
         file_dict = {
             10000: [
@@ -99,7 +112,7 @@ def create_heat_matrix(
         }
 
         budgets = [10000]
-    elif name == "NPSE" and type == "MAE":
+    elif name == "NPSE" and type == "MAE" and not one_budget:
         file_dict = {
             10000: [
                 file
@@ -121,6 +134,7 @@ def create_heat_matrix(
         heat_matrix = {}
         benchmark_names = []
 
+        print(file_list)
         # Initialize a DataFrame to store MAE values for visualization
         mae_matrix = pd.DataFrame(columns=heat_matrix.keys())
         se_matrix = pd.DataFrame(columns=heat_matrix.keys())
@@ -244,7 +258,7 @@ def create_heat_matrix(
     # producing the heatmap
     plt.rcParams.update({"font.size": 16})
     if len(budgets) > 1 or type == "MAE and Marginal":
-        fig, axes = plt.subplots(1, len(budgets), figsize=(16, 9))
+        fig, axes = plt.subplots(1, len(budgets), figsize=(17, 9))
 
         if not type == "MAE and Marginal":
             for idx, budget in enumerate(budgets):
@@ -472,7 +486,7 @@ def create_heat_matrix(
     return sim_matrix, mae_matrices, se_matrices
 
 
-# Example usage
+# Conditional and Marginal coverage for NPE files
 sim_mat, mae_mat, se_mat = create_heat_matrix(
     files_hpd,
     name="NPE",
@@ -480,21 +494,25 @@ sim_mat, mae_mat, se_mat = create_heat_matrix(
     files_marginal=files_hpd_marginal_npe,
 )
 
-# For NPSE files
+# Conditional and Marginal coverage for NPSE files
 sim_mat_npse, mae_mat_npse, se_mat_npse = create_heat_matrix(
     files_hpd_npse,
     name="NPSE",
+    type="MAE and Marginal",
+    files_marginal=files_hpd_marginal_npse,
 )
 
+# Conditional coverage for SNPE files
 sim_mat_seq, mae_mat_seq, se_mat_seq = create_heat_matrix(
     files_hpd_seq,
     name="SNPE",
 )
 
 sim_mat_marginal, mae_mat_marginal, se_mat_marginal = create_heat_matrix(
-    files_hpd_marginal_npe,
+    files_hpd,
     name="NPE",
-    type="Marginal",
+    one_budget=True,
+    sel_budget=20000,
 )
 
 sim_mat_marginal_npse, mae_mat_marginal_npse, se_mat_marginal_npse = create_heat_matrix(
