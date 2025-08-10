@@ -477,9 +477,17 @@ def create_heat_matrix(
         ax.set_title(f"Budget: {budget}")
 
         plt.tight_layout()
-        output_path = os.path.join(
-            original_path, "Results", f"{name}_heatmap_figure_{type}.png"
-        )
+        if one_budget:
+            output_path = os.path.join(
+                original_path,
+                "Results",
+                f"{name}_heatmap_figure_{type}_{sel_budget}.png",
+            )
+        else:
+            output_path = os.path.join(
+                original_path, "Results", f"{name}_heatmap_figure_{type}.png"
+            )
+
         output_path_pdf = os.path.splitext(output_path)[0] + ".pdf"
         fig.savefig(output_path_pdf, format="pdf")
         plt.show()
@@ -513,6 +521,20 @@ sim_mat_marginal, mae_mat_marginal, se_mat_marginal = create_heat_matrix(
     name="NPE",
     one_budget=True,
     sel_budget=20000,
+)
+
+sim_mat_marginal, mae_mat_marginal, se_mat_marginal = create_heat_matrix(
+    files_hpd,
+    name="NPE",
+    one_budget=True,
+    sel_budget=2000,
+)
+
+sim_mat_marginal, mae_mat_marginal, se_mat_marginal = create_heat_matrix(
+    files_hpd,
+    name="NPE",
+    one_budget=True,
+    sel_budget=1000,
 )
 
 sim_mat_marginal_npse, mae_mat_marginal_npse, se_mat_marginal_npse = create_heat_matrix(
