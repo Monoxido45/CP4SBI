@@ -153,7 +153,9 @@ def create_heat_matrix(
             data = pd.read_csv(file)
 
             # Save the column names of the dataset
-            column_names = data.columns.tolist()[2:]
+            column_names = [
+                col for i, col in enumerate(data.columns.tolist()[2:]) if i != 4
+            ]
 
             # Replace "A-LOCART MAD" with "LOCART MAD" in column names
             column_names = [
@@ -161,14 +163,16 @@ def create_heat_matrix(
             ]
 
             # Remove "MAD" from column names and modify "Local CDF" to "L-CDF"
-            column_names = [
-                name.replace(" MAD", "").replace("Local CDF", "L-CDF")
-                for name in column_names
-            ]
+            # column_names = [
+            #    name.replace(" MAD", "").replace("Local CDF", "L-CDF")
+            #    for name in column_names
+            # ]
+
+            column_names = [name.replace(" MAD", "") for name in column_names]
 
             # performance array
-            mae_array = data.iloc[0, 2:].to_numpy(dtype=float)
-            se_array = 2 * data.iloc[1, 2:].to_numpy(dtype=float)
+            mae_array = np.delete(data.iloc[0, 2:].to_numpy(dtype=float), 4)
+            se_array = 2 * np.delete(data.iloc[1, 2:].to_numpy(dtype=float), 4)
 
             # Add MAE values to the matrix
             mae_matrix[benchmark_name] = mae_array
@@ -181,6 +185,7 @@ def create_heat_matrix(
 
         # Determine significant values
         k = 0
+        print("Computing significance values:")
         if type == "MAE" or keys[j] == "Conditional MAE":
             for col in mae_matrix.columns:
                 significance_matrix.loc[:, col] = False  # Initialize with False
@@ -273,7 +278,7 @@ def create_heat_matrix(
                 sorted_benchmark_names = sorted(benchmark_names)
 
                 # Define the desired order for specific columns
-                desired_order = ["LOCART", "CDF", "L-CDF"]
+                desired_order = ["LOCART", "CDF"]
                 remaining_columns = [
                     col for col in column_names if col not in desired_order
                 ]
@@ -332,7 +337,7 @@ def create_heat_matrix(
                 ax.set_yticks(range(len(mae_matrix.index)))
                 ax.set_yticklabels(mae_matrix.index)
                 for tick, label in zip(ax.get_yticklabels(), mae_matrix.index):
-                    if label in ["LOCART", "CDF", "L-CDF"]:
+                    if label in ["LOCART", "CDF"]:
                         tick.set_fontweight("bold")
                 ax.set_title(f"Budget: {budget}")
         else:
@@ -348,7 +353,7 @@ def create_heat_matrix(
                 sorted_benchmark_names = sorted(benchmark_names)
 
                 # Define the desired order for specific columns
-                desired_order = ["LOCART", "CDF", "L-CDF"]
+                desired_order = ["LOCART", "CDF"]
                 remaining_columns = [
                     col for col in column_names if col not in desired_order
                 ]
@@ -407,7 +412,7 @@ def create_heat_matrix(
                 ax.set_yticks(range(len(mae_matrix.index)))
                 ax.set_yticklabels(mae_matrix.index)
                 for tick, label in zip(ax.get_yticklabels(), mae_matrix.index):
-                    if label in ["LOCART", "CDF", "L-CDF"]:
+                    if label in ["LOCART", "CDF"]:
                         tick.set_fontweight("bold")
                 ax.set_title(f"{kind}")
 
@@ -429,7 +434,7 @@ def create_heat_matrix(
         cmap = ListedColormap(["white", "mediumseagreen"])
 
         sorted_benchmark_names = sorted(benchmark_names)
-        desired_order = ["LOCART", "CDF", "L-CDF"]
+        desired_order = ["LOCART", "CDF"]
         remaining_columns = [col for col in column_names if col not in desired_order]
         ordered_columns = desired_order + remaining_columns
 
@@ -472,7 +477,7 @@ def create_heat_matrix(
         ax.set_yticks(range(len(mae_matrix.index)))
         ax.set_yticklabels(mae_matrix.index)
         for tick, label in zip(ax.get_yticklabels(), mae_matrix.index):
-            if label in ["LOCART", "CDF", "L-CDF"]:
+            if label in ["LOCART", "CDF"]:
                 tick.set_fontweight("bold")
         ax.set_title(f"Budget: {budget}")
 
