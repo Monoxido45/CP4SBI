@@ -274,7 +274,7 @@ axes[0, 0].imshow(
     cmap=white_blue_cmap,
     alpha=0.6,
 )
-axes[0, 0].set_title("LOCART (our approach)", fontweight="bold", color="blue")
+axes[0, 0].set_title("CP4SBI-LOCART (our approach)", fontweight="bold", color="blue")
 axes[0, 0].set_xlabel("")
 axes[0, 0].set_ylabel(r"$\theta_2$")
 axes[0, 0].set_xlim(-0.025, 0.5)
@@ -318,7 +318,7 @@ axes[0, 2].imshow(
     cmap=white_red_cmap,
     alpha=0.6,
 )
-axes[0, 2].set_title("Naive", color="red")
+axes[0, 2].set_title("Self-calibration", color="red")
 axes[0, 2].set_xlabel("")
 axes[0, 2].set_ylabel("")
 axes[0, 2].set_xlim(-0.025, 0.5)

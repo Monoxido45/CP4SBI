@@ -380,7 +380,7 @@ plt.rcParams.update({"font.size": 16})
 mae_methods = [
     ("CP4SBI-CDF", mae_2d_cdf, "blue"),
     ("Global", mae_2d_global, "green"),
-    ("Naive", mae_2d_naive, "red"),
+    ("Self-calibration", mae_2d_naive, "red"),
 ]
 labels, maes, colors = zip(*mae_methods)
 ax_bar.bar(labels, maes, color=colors, edgecolor="black", alpha=0.5)
@@ -449,7 +449,7 @@ legend_elements = [
         facecolor="none",
         edgecolor="red",
         linewidth=2,
-        label="Naive",
+        label="Self-calibration",
         alpha=0.75,
     ),
     Patch(

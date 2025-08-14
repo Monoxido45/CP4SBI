@@ -188,7 +188,7 @@ axs[2].contour(
     colors="red",
     linestyles="dashed",
     linewidths=2,
-    label="Naive Cutoff",
+    label="Self-Calibration Cutoff",
 )
 axs[2].contourf(
     X,
@@ -219,7 +219,7 @@ axs[2].text(
 )
 
 axs[2].text(
-    0.395,
+    0.370,
     0.975,
     f"Oracle = 90.0%",
     transform=axs[2].transAxes,
@@ -229,9 +229,9 @@ axs[2].text(
 )
 
 axs[2].text(
-    0.735,
+    0.685,
     0.975,
-    f"Naive = {coverage_naive*100:.1f}%",
+    f"Self-calib = {coverage_naive*100:.1f}%",
     transform=axs[2].transAxes,
     fontsize=12,
     verticalalignment="top",
@@ -246,7 +246,7 @@ for ax in axs:
 # Create custom legend handles
 legend_elements = [
     Line2D([0], [0], color="black", lw=2, label="Oracle"),
-    Line2D([0], [0], color="red", lw=2, linestyle="dashed", label="Naive"),
+    Line2D([0], [0], color="red", lw=2, linestyle="dashed", label="Self-Calibration"),
     Line2D(
         [0],
         [0],
