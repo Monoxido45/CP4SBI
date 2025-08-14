@@ -171,7 +171,12 @@ def create_heat_matrix(
             #    for name in column_names
             # ]
 
-            column_names = [name.replace(" MAD", "") for name in column_names]
+            column_names = [
+                name.replace(" MAD", "")
+                .replace("LOCART", "CP4SBI \n LOCART")
+                .replace("CDF", "CP4SBI \n CDF")
+                for name in column_names
+            ]
 
             # performance array
             mae_array = np.delete(data.iloc[0, 2:].to_numpy(dtype=float), 4)
@@ -281,7 +286,7 @@ def create_heat_matrix(
                 sorted_benchmark_names = sorted(benchmark_names)
 
                 # Define the desired order for specific columns
-                desired_order = ["LOCART", "CDF"]
+                desired_order = ["CP4SBI \n LOCART", "CP4SBI \n CDF"]
                 remaining_columns = [
                     col for col in column_names if col not in desired_order
                 ]
@@ -340,7 +345,7 @@ def create_heat_matrix(
                 ax.set_yticks(range(len(mae_matrix.index)))
                 ax.set_yticklabels(mae_matrix.index)
                 for tick, label in zip(ax.get_yticklabels(), mae_matrix.index):
-                    if label in ["LOCART", "CDF"]:
+                    if label in ["CP4SBI \n LOCART", "CP4SBI \n CDF"]:
                         tick.set_fontweight("bold")
                 ax.set_title(f"Budget: {budget}")
         else:
@@ -356,7 +361,7 @@ def create_heat_matrix(
                 sorted_benchmark_names = sorted(benchmark_names)
 
                 # Define the desired order for specific columns
-                desired_order = ["LOCART", "CDF"]
+                desired_order = ["CP4SBI \n LOCART", "CP4SBI \n CDF"]
                 remaining_columns = [
                     col for col in column_names if col not in desired_order
                 ]
@@ -415,7 +420,7 @@ def create_heat_matrix(
                 ax.set_yticks(range(len(mae_matrix.index)))
                 ax.set_yticklabels(mae_matrix.index)
                 for tick, label in zip(ax.get_yticklabels(), mae_matrix.index):
-                    if label in ["LOCART", "CDF"]:
+                    if label in ["CP4SBI \n LOCART", "CP4SBI \n CDF"]:
                         tick.set_fontweight("bold")
                 ax.set_title(f"{kind}")
 
@@ -437,7 +442,7 @@ def create_heat_matrix(
         cmap = ListedColormap(["white", "mediumseagreen"])
 
         sorted_benchmark_names = sorted(benchmark_names)
-        desired_order = ["LOCART", "CDF"]
+        desired_order = ["CP4SBI \n LOCART", "CP4SBI \n CDF"]
         remaining_columns = [col for col in column_names if col not in desired_order]
         ordered_columns = desired_order + remaining_columns
 
@@ -480,7 +485,7 @@ def create_heat_matrix(
         ax.set_yticks(range(len(mae_matrix.index)))
         ax.set_yticklabels(mae_matrix.index)
         for tick, label in zip(ax.get_yticklabels(), mae_matrix.index):
-            if label in ["LOCART", "CDF"]:
+            if label in ["CP4SBI \n LOCART", "CP4SBI \n CDF"]:
                 tick.set_fontweight("bold")
         ax.set_title(f"Budget: {budget}")
 
