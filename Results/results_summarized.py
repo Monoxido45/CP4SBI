@@ -159,7 +159,10 @@ def create_heat_matrix(
 
             # Replace "A-LOCART MAD" with "LOCART MAD" in column names
             column_names = [
-                name.replace("A-LOCART MAD", "LOCART MAD") for name in column_names
+                name.replace("A-LOCART MAD", "LOCART MAD").replace(
+                    "Naive MAD", "Self-calib MAD"
+                )
+                for name in column_names
             ]
 
             # Remove "MAD" from column names and modify "Local CDF" to "L-CDF"
