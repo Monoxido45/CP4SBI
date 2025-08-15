@@ -59,10 +59,10 @@ def create_heat_matrix(
 
     if name == "NPE" and type == "MAE" and not one_budget:
         file_dict = {
-            10000: [
+            2000: [
                 file
                 for file, budget in zip(files, simulation_budgets_lists)
-                if budget == 10000
+                if budget == 2000
             ],
             20000: [
                 file
@@ -71,7 +71,7 @@ def create_heat_matrix(
             ],
         }
 
-        budgets = [10000, 20000]
+        budgets = [2000, 20000]
     elif name in ["NPE", "NPSE"] and type == "MAE and Marginal":
         file_dict = {
             "Conditional MAE": [
@@ -505,6 +505,13 @@ def create_heat_matrix(
         fig.savefig(output_path_pdf, format="pdf")
         plt.show()
     return sim_matrix, mae_matrices, se_matrices
+
+
+# Conditional coverage for NPE files
+sim_mat, mae_mat, se_mat = create_heat_matrix(
+    files_hpd,
+    name="NPE",
+)
 
 
 # Conditional and Marginal coverage for NPE files
