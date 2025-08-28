@@ -3,7 +3,7 @@
 ## I. Install the package CP4SBI (pip)
 
 ```bash
-git clone https://github.com/seu-usuario/CP4SBI.git
+git clone https://github.com/your-user/CP4SBI.git
 cd CP4SBI
 pip install .
 ```
@@ -13,7 +13,7 @@ pip install .
 ```bash
 conda create -n cp4sbi_env python
 conda activate cp4sbi_env
-git clone https://github.com/seu-usuario/CP4SBI.git
+git clone https://github.com/your-user/CP4SBI.git
 cd CP4SBI
 pip install .
 ```
