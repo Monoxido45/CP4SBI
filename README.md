@@ -1,22 +1,36 @@
 # Conformal Prediction for Simulation Based Inference (CP4SBI)
 
-## I. Install the package CP4SBI (pip)
+## Features
+
+- Conformal prediction wrappers for SBI algorithms
+- Plug-and-play with popular SBI libraries
+- Statistical guarantees
+- Easy configuration and extension
+
+---
+
+## Installation
+
+### Using pip
 
 ```bash
-git clone https://github.com/your-user/CP4SBI.git
+git clone https://github.com/Monoxido45/CP4SBI.git
 cd CP4SBI
 pip install .
 ```
 
-## II. Install package in conda env.
+### Using Conda
 
 ```bash
-conda create -n cp4sbi_env python
+conda create -n cp4sbi_env python=3.9
 conda activate cp4sbi_env
-git clone https://github.com/your-user/CP4SBI.git
+git clone https://github.com/Monoxido45/CP4SBI.git
 cd CP4SBI
 pip install .
 ```
+
+---
+
 
 
 
