@@ -8,6 +8,7 @@ from sklearn.metrics import mean_squared_error
 from sklearn.model_selection import train_test_split
 from sklearn.tree import DecisionTreeRegressor, plot_tree
 from operator import itemgetter
+from scipy.stats import binom
 
 from tqdm import tqdm
 
@@ -175,17 +176,19 @@ class LocartInf(BaseEstimator):
             # fitting and predicting leaf labels
             if self.split_calib:
                 self.cart.fit(X_calib_train, res_calib_train)
-                leafs_idx = self.cart.apply(X_calib_test)
+                self.leafs_idx = self.cart.apply(X_calib_test)
+                self.res = res_calib_test
             else:
                 self.cart.fit(X_calib, res)
-                leafs_idx = self.cart.apply(X_calib)
+                self.leafs_idx = self.cart.apply(X_calib)
+                self.res = res
 
-            self.leaf_idx = np.unique(leafs_idx)
+            self.leaf_idx = np.unique(self.leafs_idx)
             self.cutoffs = {}
 
             for leaf in self.leaf_idx:
                 if self.split_calib:
-                    current_res = res_calib_test[leafs_idx == leaf]
+                    current_res = res_calib_test[self.leafs_idx == leaf]
 
                     # correcting 1 - alpha
                     n = current_res.shape[0]
@@ -194,7 +197,7 @@ class LocartInf(BaseEstimator):
                         current_res, q=np.ceil((n + 1) * (1 - self.alpha)) / n
                     )
                 else:
-                    current_res = res[leafs_idx == leaf]
+                    current_res = res[self.leafs_idx == leaf]
 
                     # correcting 1 - alpha
                     n = current_res.shape[0]
@@ -385,6 +388,62 @@ class LocartInf(BaseEstimator):
 
         return cutoff
 
+    def cutoff_uncertainty(self, X_test, beta=0.05):
+        """
+        Compute the confidence interval for each cutoff
+
+        Parameters:
+        local res (array): Local residuals.
+        Cutoff (float): Cutoff estimate
+        alpha (float): Significance level.
+
+        Returns:
+        dict: A dictionary containing the interval and the coverage.
+        """
+        cutoff_CI = np.zeros((X_test.shape[0], 2))
+        k = 0
+        if self.cart_type == "CART":
+            for X in X_test:
+                local_res = self.res[
+                    self.leafs_idx == self.cart.apply(X.reshape(1, -1))[0]
+                ]
+
+                n = local_res.shape[0]
+                q = 1 - self.alpha
+
+                # Search over a small range of upper and lower order statistics for the
+                # closest coverage to 1-alpha (but not less than it, if possible).
+                u = binom.ppf(1 - beta / 2, n, q).astype(int) + np.arange(-2, 3) + 1
+                l = binom.ppf(beta / 2, n, q).astype(int) + np.arange(-2, 3)
+                u[u > n] = np.iinfo(np.int64).max
+                l[l < 0] = np.iinfo(np.int64).min
+
+                coverage = np.array(
+                    [
+                        [binom.cdf(b - 1, n, q) - binom.cdf(a - 1, n, q) for b in u]
+                        for a in l
+                    ]
+                )
+
+                if np.max(coverage) < 1 - beta:
+                    i = np.argmax(coverage)
+                else:
+                    i = np.argmin(coverage[coverage >= 1 - beta])
+
+                # Return the order statistics
+                u = np.repeat(u, 5)[i]
+                l = np.repeat(l, 5)[i]
+
+                # ordering local res
+                order_local_res = np.sort(local_res)
+                # return interval
+                lim_inf, lim_sup = order_local_res[l], order_local_res[u]
+                cutoff_CI[k, :] = np.array([lim_inf, lim_sup])
+                k += 1
+
+        self.cutoff_CI = cutoff_CI
+        return cutoff_CI
+
     def predict_cutoff(self, X, n_samples=1000):
         """
         Predict cutoffs for each test sample using locart local cutoffs.
@@ -534,6 +593,7 @@ class CDFSplit(BaseEstimator):
             self.cutoffs = np.quantile(
                 new_res, q=np.ceil((n + 1) * (1 - self.alpha)) / n
             )
+            self.new_res = new_res
         else:
             print("Fitting LOCART to CDF scores to derive local cutoffs")
             if self.split_calib:
@@ -579,9 +639,14 @@ class CDFSplit(BaseEstimator):
             if self.split_calib:
                 self.cart.fit(X_calib_train, res_calib_train)
                 leafs_idx = self.cart.apply(X_calib_test)
+
+                self.new_res = res_calib_test
+                self.leafs_idx = leafs_idx
             else:
                 self.cart.fit(X_calib, new_res)
                 leafs_idx = self.cart.apply(X_calib)
+
+                self.leafs_idx = leafs_idx
 
             self.leaf_idx = np.unique(leafs_idx)
             self.cutoffs = {}
@@ -650,6 +715,153 @@ class CDFSplit(BaseEstimator):
 
         return optim_ccp
 
+    def cutoff_uncertainty(self, X_test, B=2000, beta=0.05):
+        """
+        Compute the bootstrap confidence interval for each cutoff
+
+        Parameters:
+        X_test (array): X_test samples.
+        B (integer): Number of bootstrap samples
+
+        Returns:
+        dict: Array containing confidence intervals for each cutoff.
+        """
+        cutoff_CI = np.zeros((X_test.shape[0], 2))
+        k = 0
+
+        if self.local_cutoffs:
+            for X in X_test:
+                local_res = self.new_res[
+                    self.leafs_idx == self.cart.apply(X.reshape(1, -1))[0]
+                ]
+
+                n = local_res.shape[0]
+                q = 1 - self.alpha
+
+                # Search over a small range of upper and lower order statistics for the
+                # closest coverage to 1-alpha (but not less than it, if possible).
+                u = binom.ppf(1 - beta / 2, n, q).astype(int) + np.arange(-2, 3) + 1
+                l = binom.ppf(beta / 2, n, q).astype(int) + np.arange(-2, 3)
+                u[u > n] = np.iinfo(np.int64).max
+                l[l < 0] = np.iinfo(np.int64).min
+
+                coverage = np.array(
+                    [
+                        [binom.cdf(b - 1, n, q) - binom.cdf(a - 1, n, q) for b in u]
+                        for a in l
+                    ]
+                )
+
+                if np.max(coverage) < 1 - beta:
+                    i = np.argmax(coverage)
+                else:
+                    i = np.argmin(coverage[coverage >= 1 - beta])
+
+                # Return the order statistics
+                u = np.repeat(u, 5)[i]
+                l = np.repeat(l, 5)[i]
+
+                # ordering local res
+                order_local_res = np.sort(local_res)
+                # deriving lim_inf and lim_sup
+                lim_inf, lim_sup = order_local_res[l], order_local_res[u]
+
+                # now computing the cutoffs for lim_inf and lim_sup
+                theta_pos = self.sbi_score.posterior.sample(
+                    (B,),
+                    x=X,
+                    show_progress_bars=False,
+                )
+
+                score = self.sbi_score.compute(X, theta_pos, one_X=True)
+
+                # computing the quantile from theta_pos using the new cutoff
+                lim_inf_F = np.quantile(
+                    score,
+                    q=lim_inf,
+                )
+
+                lim_sup_F = np.quantile(
+                    score,
+                    q=lim_sup,
+                )
+
+                cutoff_CI[k, :] = np.array([lim_inf_F, lim_sup_F])
+                k += 1
+        else:
+            local_res = self.new_res
+            n = local_res.shape[0]
+            q = 1 - self.alpha
+
+            # Search over a small range of upper and lower order statistics for the
+            # closest coverage to 1-alpha (but not less than it, if possible).
+            u = binom.ppf(1 - beta / 2, n, q).astype(int) + np.arange(-2, 3) + 1
+            l = binom.ppf(beta / 2, n, q).astype(int) + np.arange(-2, 3)
+            u[u > n] = np.iinfo(np.int64).max
+            l[l < 0] = np.iinfo(np.int64).min
+
+            coverage = np.array(
+                [
+                    [binom.cdf(b - 1, n, q) - binom.cdf(a - 1, n, q) for b in u]
+                    for a in l
+                ]
+            )
+
+            if np.max(coverage) < 1 - beta:
+                i = np.argmax(coverage)
+            else:
+                i = np.argmin(coverage[coverage >= 1 - beta])
+
+            # Return the order statistics
+            u = np.repeat(u, 5)[i]
+            l = np.repeat(l, 5)[i]
+
+            # ordering local res
+            order_local_res = np.sort(local_res)
+            # deriving lim_inf and lim_sup
+            lim_inf, lim_sup = order_local_res[l], order_local_res[u]
+            print(lim_inf, lim_sup)
+
+            for X in X_test:
+                X = X.reshape(1, -1)
+                if self.cuda:
+                    X = X.to(device="cuda")
+
+                # checking if X has already a dictionary of samples
+                if hasattr(self, "sample_dict"):
+                    print("Using existing dictionary of samples")
+                    keys_list = list(self.sample_dict.keys())
+                    for t in keys_list:
+                        if torch.equal(X, t):
+                            found = True
+                            break
+                    if found:
+                        theta_pos = self.sample_dict[t]
+                else:
+                    theta_pos = self.sbi_score.posterior.sample(
+                        (B,),
+                        x=X,
+                        show_progress_bars=False,
+                    )
+
+                scores = self.sbi_score.compute(X, theta_pos, one_X=True)
+
+                # computing the quantile from theta_pos using the new cutoff
+                lim_inf_F = np.quantile(
+                    scores,
+                    q=lim_inf,
+                )
+
+                lim_sup_F = np.quantile(
+                    scores,
+                    q=lim_sup,
+                )
+
+                cutoff_CI[k, :] = np.array([lim_inf_F, lim_sup_F])
+                k += 1
+
+        return cutoff_CI
+
     def predict_cutoff(self, X_test, n_samples=2000):
         """
         Predict cutoffs for each test sample using the CDF conformal method
@@ -660,6 +872,7 @@ class CDFSplit(BaseEstimator):
         """
         cutoffs = np.zeros(X_test.shape[0])
         i = 0
+        self.sample_dict = {}
 
         # Transform X_test into a tensor if it is a numpy array
         if isinstance(X_test, np.ndarray):
@@ -676,10 +889,13 @@ class CDFSplit(BaseEstimator):
                     x=X,
                     show_progress_bars=False,
                 )
+                self.sample_dict[X] = theta_pos
+
+                scores = self.sbi_score.compute(X, theta_pos, one_X=True)
 
                 # computing the quantile from theta_pos using the new cutoff
                 cutoffs[i] = np.quantile(
-                    self.sbi_score.compute(X, theta_pos, one_X=True),
+                    scores,
                     q=self.cutoffs,
                 )
 
@@ -899,7 +1115,7 @@ class BayCon:
         self,
         X_test,
     ):
-        """self.is_fitted = True
+        """
         Predict cutoffs for test samples using the calibrated conformal method.
         Args:
         X_test (numpy.ndarray): Test feature matrix.
@@ -920,6 +1136,82 @@ class BayCon:
             cutoffs = self.cdf_split.predict_cutoff(X_test)
 
         return cutoffs
+
+    def uncertainty_cutoff(
+        self,
+        X_test,
+        beta=0.05,
+        B=2000,
+    ):
+        if self.conformal_method == "local":
+            if self.locart is None:
+                raise RuntimeError(
+                    "Conformal method must be calibrated before prediction"
+                )
+            cutoff_CI = self.locart.cutoff_uncertainty(X_test, beta=beta)
+        elif self.conformal_method == "CDF" or self.conformal_method == "CDF local":
+            cutoff_CI = self.cdf_split.cutoff_uncertainty(X_test, B=B, beta=beta)
+
+        self.cutoff_CI = cutoff_CI
+        return cutoff_CI
+
+    def uncertainty_region(
+        self,
+        X,
+        thetas,
+        beta=0.05,
+        B=2000,
+        track_progress=True,
+    ):
+        """
+        Compute the confidence interval for each cutoff
+
+        Parameters:
+        X (array): X_test samples.
+        thetas (array): Parameter samples.
+        B (integer): Number of bootstrap samples
+        beta (float): Significance level for the confidence interval.
+
+        Returns:
+        dict: Array containing confidence intervals for each cutoff.
+        """
+        theta_dec = np.zeros((X.shape[0], thetas.shape[0]))
+        i = 0
+
+        cutoff_CI = self.uncertainty_cutoff(X, beta=beta, B=B)
+
+        if self.conformal_method == "local":
+            sbi_score = self.locart.sbi_score
+        elif self.conformal_method == "CDF" or self.conformal_method == "CDF local":
+            sbi_score = self.cdf_split.sbi_score
+
+        for F_int in cutoff_CI:
+            j = 0
+            scores = sbi_score.compute(
+                X[i].reshape(1, -1),
+                thetas,
+                one_X=True,
+            )
+            if track_progress:
+                for j, theta in tqdm(enumerate(thetas)):
+                    if F_int[0] <= scores[j] <= F_int[1]:
+                        theta_dec[i, j] = 0.5
+                    elif scores[j] > F_int[1]:
+                        theta_dec[i, j] = 0
+                    else:
+                        theta_dec[i, j] = 1
+                    j += 1
+            else:
+                for j, theta in enumerate(thetas):
+                    if F_int[0] <= scores[j] <= F_int[1]:
+                        theta_dec[i, j] = 0.5
+                    elif scores[j] > F_int[1]:
+                        theta_dec[i, j] = 0
+                    else:
+                        theta_dec[i, j] = 1
+                    j += 1
+            i += 1
+        return theta_dec
 
     def retrain_obs(
         self,
