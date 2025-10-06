@@ -647,6 +647,7 @@ class CDFSplit(BaseEstimator):
                 leafs_idx = self.cart.apply(X_calib)
 
                 self.leafs_idx = leafs_idx
+                self.new_res = new_res
 
             self.leaf_idx = np.unique(leafs_idx)
             self.cutoffs = {}
@@ -766,13 +767,31 @@ class CDFSplit(BaseEstimator):
                 # deriving lim_inf and lim_sup
                 lim_inf, lim_sup = order_local_res[l], order_local_res[u]
 
-                # now computing the cutoffs for lim_inf and lim_sup
-                theta_pos = self.sbi_score.posterior.sample(
-                    (B,),
-                    x=X,
-                    show_progress_bars=False,
-                )
-
+                # checking if X has already a dictionary of samples
+                if hasattr(self, "sample_dict"):
+                    found = False
+                    print("Using existing dictionary of samples")
+                    keys_list = list(self.sample_dict.keys())
+                    for t in keys_list:
+                        if torch.equal(X, t):
+                            found = True
+                            break
+                    if found:
+                        theta_pos = self.sample_dict[t]
+                    else:
+                        theta_pos = self.sbi_score.posterior.sample(
+                            (B,),
+                            x=X,
+                            show_progress_bars=False,
+                        )
+                        self.sample_dict[X] = theta_pos    
+                else:
+                    theta_pos = self.sbi_score.posterior.sample(
+                        (B,),
+                        x=X,
+                        show_progress_bars=False,
+                    )
+                    
                 score = self.sbi_score.compute(X, theta_pos, one_X=True)
 
                 # computing the quantile from theta_pos using the new cutoff
@@ -829,6 +848,7 @@ class CDFSplit(BaseEstimator):
 
                 # checking if X has already a dictionary of samples
                 if hasattr(self, "sample_dict"):
+                    found = False
                     print("Using existing dictionary of samples")
                     keys_list = list(self.sample_dict.keys())
                     for t in keys_list:
@@ -837,6 +857,13 @@ class CDFSplit(BaseEstimator):
                             break
                     if found:
                         theta_pos = self.sample_dict[t]
+                    else:
+                        theta_pos = self.sbi_score.posterior.sample(
+                            (B,),
+                            x=X,
+                            show_progress_bars=False,
+                        )
+                        self.sample_dict[X] = theta_pos    
                 else:
                     theta_pos = self.sbi_score.posterior.sample(
                         (B,),
@@ -921,10 +948,13 @@ class CDFSplit(BaseEstimator):
                     x=X,
                     show_progress_bars=False,
                 )
+                self.sample_dict[X] = theta_pos
+
+                scores = self.sbi_score.compute(X, theta_pos, one_X=True)
 
                 # computing the quantile from theta_pos using the new cutoff
                 cutoffs[i] = np.quantile(
-                    self.sbi_score.compute(X, theta_pos, one_X=True),
+                    scores,
                     q=spec_cutoff,
                 )
 

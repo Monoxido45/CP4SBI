@@ -80,7 +80,7 @@ cdf_conf_2d = BayCon(
     sbi_score=HPDScore,
     base_inference=inference_2d,
     is_fitted=True,
-    conformal_method="CDF",
+    conformal_method="CDF local",
     cuda=cuda,
     alpha=0.1,
 )
