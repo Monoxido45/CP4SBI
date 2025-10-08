@@ -703,8 +703,8 @@ all_results_list = compare_uncertainty_regions(
 with open(f"all_results_list_{task_name}.pkl", "wb") as f:
     pickle.dump(all_results_list, f)
 
-y_lims = [-1.15, 1.15]
-x_lims = [-1.15, 1.15]
+y_lims = [0.2, 1.05]
+x_lims = [-0.1, 0.65]
 plot_uncertainty_regions(all_results_list, x_lims, y_lims, task_name = "bernoulli_glm")
 
 task_name = "sir"
