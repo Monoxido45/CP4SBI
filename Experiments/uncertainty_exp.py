@@ -13,7 +13,7 @@ from matplotlib.patches import Patch
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 import gc
-
+import pickle
 import math
 from torch.distributions.multivariate_normal import MultivariateNormal
 from torch.distributions.log_normal import LogNormal
@@ -25,15 +25,17 @@ torch.manual_seed(125)
 torch.cuda.manual_seed(125)
 alpha = 0.1
 
-# defining function to compute cutoffs and compare uncertainty regions between different sim budgets
-# B = 5000, 10000 and 20000
+# defining function to compute cutoffs and compare uncertainty regions between different calibration budgets
+# B = 1000, 2000, 4000, 8000
+# fixing B = 10000 for NPE training
 def compare_uncertainty_regions(task_name,
                                 theta_grid,
                                 theta_len,
-                                B_list = [5000, 10000, 20000],
-                                prop_calib=0.2, 
+                                B_list = [1000, 2000, 4000, 8000],
+                                B_train = 10000,
                                 device = "cpu", 
-                                min_samples_leaf=[150,300,300], 
+                                min_samples_leaf=[150,300,300,750],
+                                X_str = False,
                                 seed = 125,):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
@@ -50,6 +52,58 @@ def compare_uncertainty_regions(task_name,
         simulator = task.get_simulator()
         prior = task.get_prior()
     
+    # Load the dictionary from the pickle file
+    if X_str:
+        posterior_data_path = (
+            original_path + f"/Results/posterior_data/{task_name}_posterior_samples.pkl"
+        )
+        with open(posterior_data_path, "rb") as f:
+            X_dict = pickle.load(f)
+    
+        # Load the X_list pickle file from the X_data folder
+        x_data_path = os.path.join(
+            original_path, "Results/X_data", f"{task_name}_X_samples_20000.pkl"
+        )
+        with open(x_data_path, "rb") as f:
+            X_data = pickle.load(f)
+
+        # Load the X_list pickle file from the X_data folder
+        theta_data_path = os.path.join(
+            original_path, "Results/X_data", f"{task_name}_theta_samples_20000.pkl"
+        )
+        with open(theta_data_path, "rb") as f:
+            theta_list = pickle.load(f)
+
+        X_list = {"X": X_data, "theta": theta_list}
+
+        X = X_list["X"][0]
+        theta = X_list["theta"][0]
+        # splitting X
+        indices = torch.randperm(X.shape[0])
+        train_indices = indices[:B_train]
+        calib_indices = indices[B_train:]
+
+        X_train = X[train_indices]
+        X_calib = X[calib_indices]
+
+        # splitting theta
+        theta_train_all = theta[train_indices]
+        thetas_calib_all = theta[calib_indices]
+    
+    else:
+        theta_all = prior(num_samples=20000)
+        X_all = simulator(theta_all)
+
+        # splitting X
+        indices = torch.randperm(X_all.shape[0])
+        train_indices = indices[:B_train]
+        calib_indices = indices[B_train:]
+        X_train = X_all[train_indices]
+        X_calib = X_all[calib_indices]
+        # splitting theta
+        theta_train_all = theta_all[train_indices]
+        thetas_calib_all = theta_all[calib_indices]
+
     # determining prior for NPE
     if task_name == "two_moons":
         prior_NPE = BoxUniform(
@@ -89,10 +143,8 @@ def compare_uncertainty_regions(task_name,
             device=device,
         )
         X_obs = task.get_observation(num_observation=1)
-        true_post_samples = task._sample_reference_posterior(
-            num_samples=1000,
-            num_observation=1,
-        )[:, :2]
+        first_entry = next(iter(X_dict))
+        true_post_samples = X_dict[first_entry][:, :2]
 
     elif task_name == "gaussian_linear":
         prior_params = {
@@ -144,10 +196,8 @@ def compare_uncertainty_regions(task_name,
         
         # taking one of the observations with ground truth available
         X_obs = task.get_observation(num_observation=1)
-        true_post_samples = task._sample_reference_posterior(
-            num_samples=1000,
-            num_observation=1,
-        )[:, :2]
+        first_entry = next(iter(X_dict))
+        true_post_samples = X_dict[first_entry][:, :2]
 
     elif task_name == "gaussian_mixture":
         prior_NPE = BoxUniform(
@@ -180,11 +230,9 @@ def compare_uncertainty_regions(task_name,
         prior_dist = MultipleIndependent(prior_list, validate_args=False)
         prior_NPE, _, _ = process_prior(prior_dist)
         X_obs = task.get_observation(num_observation=1)
-        true_post_samples = task._sample_reference_posterior(
-            num_samples=1000,
-            num_observation=1
-        )[:, :2]
-        
+        first_entry = next(iter(X_dict))
+        true_post_samples = X_dict[first_entry][:, :2]
+      
     elif task_name == "lotka_volterra":
         mu_p1 = -0.125
         mu_p2 = -3.0
@@ -209,33 +257,27 @@ def compare_uncertainty_regions(task_name,
         prior_dist = MultipleIndependent(prior_list, validate_args=False)
         prior_NPE, _, _ = process_prior(prior_dist)
         X_obs = task.get_observation(num_observation=1)
+        first_entry = next(iter(X_dict))
+        true_post_samples = X_dict[first_entry][:, :2]
 
-        true_post_samples = task._sample_reference_posterior(
-            num_samples=1000,
-            num_observation=1
-        )[:, :2]
-    
     uncertainty_map_cdf, uncertainty_map_locart = {}, {}
     cdf_mask, locart_mask = {}, {}
     oracle_mask = {}
     mae_dict_cdf, mae_dict_locart = {}, {}
     target_coverage = 1-alpha
+    
+    error_locart_dict = {}
+    error_cdf_dict = {}
+
+    theta_train_used = theta_train_all[:, :2]
+    # training the NPE only once with B = 10000
+    inference = NPE(prior_NPE, device=device)
+    inference.append_simulations(theta_train_used, X_train).train()
 
     i = 0
     for B in tqdm(B_list, desc="Making maps for each simulation budget"):
-        B_train = int(B * (1 - prop_calib))
-        B_calib = int(B * prop_calib)
-
-        theta_train_all = prior(num_samples=B_train)
-        X_train = simulator(theta_train_all)
-        theta_train_used = theta_train_all[:, :2]
-
-        thetas_calib_all = prior(num_samples=B_calib)
-        X_calib = simulator(thetas_calib_all)
-        thetas_calib_used = thetas_calib_all[:, :2]
-
-        inference = NPE(prior_NPE, device=device)
-        inference.append_simulations(theta_train_used, X_train).train()
+        X_calib_used = X_calib[:B, :]
+        thetas_calib_used = thetas_calib_all[:B, :2]
 
         cuda = device == "cuda"
 
@@ -254,7 +296,7 @@ def compare_uncertainty_regions(task_name,
             theta=theta_train_used,
         )
 
-        res = bayes_conf_2d.locart.sbi_score.compute(X_calib, thetas_calib_used)
+        res = bayes_conf_2d.locart.sbi_score.compute(X_calib_used, thetas_calib_used)
 
         # fitting cdf local
         cdf_conf_2d = BayCon(
@@ -272,13 +314,13 @@ def compare_uncertainty_regions(task_name,
 
         # deriving cutoffs
         bayes_conf_2d.calib(
-            X_calib=X_calib,
+            X_calib=X_calib_used,
             theta_calib=res,
             min_samples_leaf=min_samples_leaf[i],
             using_res=True,
         )
         cdf_conf_2d.calib(
-            X_calib=X_calib,
+            X_calib=X_calib_used,
             theta_calib=res,
             using_res=True,
             min_samples_leaf=min_samples_leaf[i],
@@ -311,7 +353,7 @@ def compare_uncertainty_regions(task_name,
         t_grid = np.arange(
             np.min(conf_scores_2d),
             np.max(conf_scores_2d),
-            0.005,
+            0.01,
         )
 
         # computing MC integral for all t_grid
@@ -321,7 +363,7 @@ def compare_uncertainty_regions(task_name,
 
         closest_t_index = np.argmin(np.abs(coverage_array - target_coverage))
         # finally, finding the naive cutoff
-        oracle_cutoff_2d = t_grid[closest_t_index]
+        oracle_cutoff_2d = t_grid[closest_t_index]        
 
         locart_unc = bayes_conf_2d.uncertainty_region(
             X=X_obs,
@@ -335,6 +377,7 @@ def compare_uncertainty_regions(task_name,
             B=2000,
             beta=0.1,
         )
+
         locart_unc = locart_unc.reshape(theta_len, theta_len)
         cdf_unc = cdf_unc.reshape(theta_len, theta_len)
 
@@ -359,15 +402,66 @@ def compare_uncertainty_regions(task_name,
         locart_mask_obs = locart_mask_obs.reshape(theta_len, theta_len)
         real_mask_obs = real_mask_obs.reshape(theta_len, theta_len)
 
+        # computing inside and outside regions for conf_scores_2d thetas
+        locart_unc_true = bayes_conf_2d.uncertainty_region(
+            X=X_obs,
+            thetas=post_samples_2d.to(device=device),
+            beta=0.1,
+        )
+
+        cdf_unc_true = cdf_conf_2d.uncertainty_region(
+            X=X_obs,
+            thetas=post_samples_2d.to(device=device),
+            B=2000,
+            beta=0.1,
+        )
+
+
+        # obtaining prob of each kind of error by using true post samples
+        not_in_oracle_region = conf_scores_2d > oracle_cutoff_2d
+        # computing type 2 error for locart and CDF
+        not_in_oracle_but_in_locart = np.logical_and(
+            not_in_oracle_region, locart_unc_true > 0.99
+        )
+        type_2_error_locart = np.sum(not_in_oracle_but_in_locart)/np.sum(not_in_oracle_region)
+
+        not_in_oracle_but_in_cdf = np.logical_and(
+            not_in_oracle_region, cdf_unc_true > 0.99
+        )
+        type_2_error_cdf = np.sum(not_in_oracle_but_in_cdf)/np.sum(not_in_oracle_region)
+
+        in_oracle_region = conf_scores_2d <= oracle_cutoff_2d
+
+        # computing type 1 error for locart and CDF
+        in_oracle_but_not_in_locart = np.logical_and(
+            in_oracle_region, locart_unc_true < 0.01
+        )
+        type_1_error_locart = np.sum(in_oracle_but_not_in_locart) / np.sum(in_oracle_region)
+
+        in_oracle_but_not_in_cdf = np.logical_and(
+            in_oracle_region, cdf_unc_true < 0.01
+        )
+        type_1_error_cdf = np.sum(in_oracle_but_not_in_cdf) / np.sum(in_oracle_region)
+        
+        print(f"B={B}: Type 1 error LOCART={type_1_error_locart:.4f}, Type 2 error LOCART={type_2_error_locart:.4f}")
+        print(f"B={B}: Type 1 error CDF={type_1_error_cdf:.4f}, Type 2 error CDF={type_2_error_cdf:.4f}")
+
+        error_locart_dict[B] = [type_1_error_locart, type_2_error_locart]
+        error_cdf_dict[B] = [type_1_error_cdf, type_2_error_cdf]
+
         cdf_mask[B] = cdf_mask_obs
         locart_mask[B] = locart_mask_obs
         oracle_mask[B] = real_mask_obs
         i += 1
     
     # return everything for further plotting
-    return [uncertainty_map_cdf, uncertainty_map_locart, cdf_mask, locart_mask, oracle_mask, mae_dict_cdf, mae_dict_locart]
+    return [uncertainty_map_cdf, uncertainty_map_locart, cdf_mask, locart_mask, oracle_mask, mae_dict_cdf, mae_dict_locart, error_cdf_dict, error_locart_dict]
 
-def plot_uncertainty_regions(all_results_list, x_lims, y_lims, task_name)   :
+def plot_uncertainty_regions(
+        all_results_list, 
+        x_lims, 
+        y_lims, 
+        task_name)   :
     unc_dict_cdf, unc_dict_locart = all_results_list[0], all_results_list[1]
     cdf_mask_dict, locart_mask_dict = all_results_list[2], all_results_list[3]
     real_mask_dict = all_results_list[4]
@@ -476,7 +570,7 @@ def plot_uncertainty_regions(all_results_list, x_lims, y_lims, task_name)   :
         Patch(facecolor="none", edgecolor="blue", linewidth=2, label=r"$\mathbf{CP4SBI\text{-}LOCART}$", alpha=0.75),
         Patch(facecolor="lime", edgecolor="none", linewidth=2, label="Inside region", alpha=0.5),
         Patch(facecolor="darkorange", edgecolor="none", linewidth=2, label="Underterminate region", alpha=0.8),
-        Patch(facecolor="none", edgecolor="grey", linewidth=2, label="Oracle region", alpha=1.0),
+        Patch(facecolor="none", edgecolor="grey", linewidth=2, label="Target region", alpha=1.0),
     ]
     fig.legend(
         handles=legend_elements,
@@ -504,10 +598,17 @@ task_name = "gaussian_linear_uniform"
 theta = torch.linspace(-1.005, 1.005, 3000)
 theta_grid = torch.cartesian_prod(theta, theta)
 
-all_results_list = compare_uncertainty_regions(task_name, theta_grid = theta_grid, theta_len = len(theta), seed = 1250)
+all_results_list = compare_uncertainty_regions(
+    task_name, 
+    theta_grid = theta_grid, 
+    theta_len = len(theta), 
+    seed = 750,
+)
+with open(f"all_results_list_{task_name}.pkl", "wb") as f:
+    pickle.dump(all_results_list, f)
 
-y_lims = [-0.65, 0.8]
-x_lims = [-0.65, 0.85]
+y_lims = [-1.5, 1.25]
+x_lims = [-1.25, 1.25]
 plot_uncertainty_regions(all_results_list, x_lims, y_lims, task_name = "glu")
 
 # testing two moons also
@@ -516,10 +617,18 @@ task_name = "two_moons"
 theta = torch.linspace(-1.005, 1.005, 3000)
 theta_grid = torch.cartesian_prod(theta, theta)
 
-all_results_list = compare_uncertainty_regions(task_name, theta_grid = theta_grid, theta_len = len(theta), seed = 1250)
+all_results_list = compare_uncertainty_regions(
+    task_name, 
+    theta_grid = theta_grid, 
+    theta_len = len(theta),
+    B_train = 5000,
+    seed = 1250,
+    )
+with open(f"all_results_list_{task_name}.pkl", "wb") as f:
+    pickle.dump(all_results_list, f)
 
-y_lims = [-0.55, 0.05]
-x_lims = [-0.1, 0.65]
+y_lims = [-0.35, 0.05]
+x_lims = [-0.1, 0.4]
 plot_uncertainty_regions(all_results_list, x_lims, y_lims, task_name = "two_moons")
 
 # testing for gaussian mixture
@@ -534,26 +643,12 @@ all_results_list = compare_uncertainty_regions(
     theta_len = len(theta), 
     seed = 1250,)
 
+with open(f"all_results_list_{task_name}.pkl", "wb") as f:
+    pickle.dump(all_results_list, f)
+
 y_lims = [-1.05, 1.05]
 x_lims = [-1.15, 1.15]
 plot_uncertainty_regions(all_results_list, x_lims, y_lims, task_name = "gaussian_mixture")
-
-# testing another seed
-task_name = "gaussian_mixture"
-# generating grid of thetas
-theta = torch.linspace(-3.005, 3.005, 3000)
-theta_grid = torch.cartesian_prod(theta, theta)
-
-all_results_list = compare_uncertainty_regions(
-    task_name, 
-    theta_grid = theta_grid, 
-    theta_len = len(theta), 
-    B_list = [5000, 10000, 20000, 30000],
-    seed = 750,)
-
-y_lims = [-1.15, 0.75]
-x_lims = [-1.25, 1.25]
-plot_uncertainty_regions(all_results_list, x_lims, y_lims, task_name = "gaussian_mixture_v2")
 
 # testing for gaussian linear
 task_name = "gaussian_linear"
@@ -564,13 +659,89 @@ theta_grid = torch.cartesian_prod(theta, theta)
 all_results_list = compare_uncertainty_regions(
     task_name, 
     theta_grid = theta_grid, 
-    theta_len = len(theta), 
+    theta_len = len(theta),
     seed = 1250,)
 
-y_lims = [-0.3, 0.25]
-x_lims = [-0.1, 0.65]
+with open(f"all_results_list_{task_name}.pkl", "wb") as f:
+    pickle.dump(all_results_list, f)
+
+y_lims = [-0.35, 0.2]
+x_lims = [-0.25, 0.35]
 plot_uncertainty_regions(all_results_list, x_lims, y_lims, task_name = "gaussian_linear")
 
+task_name = "slcp"
+# generating grid of thetas
+theta = torch.linspace(-3.005, 3.005, 3000)
+theta_grid = torch.cartesian_prod(theta, theta)
 
+all_results_list = compare_uncertainty_regions(
+    task_name, 
+    theta_grid = theta_grid, 
+    theta_len = len(theta),
+    X_str=True,
+    seed = 1250,)
 
+with open(f"all_results_list_{task_name}.pkl", "wb") as f:
+    pickle.dump(all_results_list, f)
+
+y_lims = [-1.15, 1.15]
+x_lims = [-1.15, 1.15]
+plot_uncertainty_regions(all_results_list, x_lims, y_lims, task_name = "slcp")
+
+task_name = "bernoulli_glm"
+# generating grid of thetas
+theta = torch.linspace(-3.000, 3.000, 3000)
+theta_grid = torch.cartesian_prod(theta, theta)
+
+all_results_list = compare_uncertainty_regions(
+    task_name, 
+    theta_grid = theta_grid, 
+    theta_len = len(theta),
+    X_str=True,
+    seed = 750,)
+
+with open(f"all_results_list_{task_name}.pkl", "wb") as f:
+    pickle.dump(all_results_list, f)
+
+y_lims = [-1.15, 1.15]
+x_lims = [-1.15, 1.15]
+plot_uncertainty_regions(all_results_list, x_lims, y_lims, task_name = "bernoulli_glm")
+
+task_name = "sir"
+# generating grid of thetas
+theta = torch.linspace(0.005, 2.005, 3000)
+theta_grid = torch.cartesian_prod(theta, theta)
+
+all_results_list = compare_uncertainty_regions(
+    task_name, 
+    theta_grid = theta_grid, 
+    theta_len = len(theta),
+    X_str=True,
+    seed = 750,)
+
+with open(f"all_results_list_{task_name}.pkl", "wb") as f:
+    pickle.dump(all_results_list, f)
+
+y_lims = [0, 1.15]
+x_lims = [0, 1.15]
+plot_uncertainty_regions(all_results_list, x_lims, y_lims, task_name = "sir")
+
+task_name = "lotka_volterra"
+# generating grid of thetas
+theta = torch.linspace(0.005, 2.005, 3000)
+theta_grid = torch.cartesian_prod(theta, theta)
+
+all_results_list = compare_uncertainty_regions(
+    task_name, 
+    theta_grid = theta_grid, 
+    theta_len = len(theta),
+    X_str=True,
+    seed = 750,)
+
+with open(f"all_results_list_{task_name}.pkl", "wb") as f:
+    pickle.dump(all_results_list, f)
+
+y_lims = [0, 1.15]
+x_lims = [0, 1.15]
+plot_uncertainty_regions(all_results_list, x_lims, y_lims, task_name = "lotka_volterra")
 

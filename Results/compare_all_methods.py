@@ -304,7 +304,7 @@ def compute_coverage(
     naive_samples=1000,
     sample_with="direct",
 ):
-    # setting seet
+    # setting seed
     if not task_name == "gaussian_mixture":
         torch.manual_seed(random_seed)
         torch.cuda.manual_seed(random_seed)
