@@ -208,7 +208,7 @@ class LocartInf(BaseEstimator):
 
         return self.cutoffs
 
-    def compute_variance(self, X, n_samples=1000):
+    def compute_variance(self, X, n_samples=1000, dict_verbose=False):
         """
         Auxiliary function to compute difficulty for each sample.
         --------------------------------------------------------
@@ -218,28 +218,46 @@ class LocartInf(BaseEstimator):
         output: Vector of variance estimates for each sample.
         """
         var_array = np.zeros(X.shape[0])
+        # creating a dictionary if there is not already one to gain numeric stability
+        if not hasattr(self, "var_dict"):
+            self.var_dict = {}
+        
+        keys_list = list(self.var_dict.keys())
+        keys_tensor = torch.stack(keys_list) if keys_list else torch.empty((0, X.shape[1]))
+
         # Convert X to torch tensor if it is a numpy array
         if isinstance(X, np.ndarray):
             X = torch.tensor(X, dtype=torch.float32)
 
         j = 0
         for X_obs in tqdm(X, desc="Computting variance of conformal scores"):
-            X_obs = X_obs.reshape(1, -1)
+            if hasattr(self, "var_dict") and keys_tensor.shape[0] > 0:
+                # Use broadcasting to compare all keys at once
+                matches = torch.all(X_obs == keys_tensor, dim=1)
+                if torch.any(matches):
+                    if dict_verbose:
+                        print("Using cached variance value.")
+                    idx = torch.nonzero(matches, as_tuple=False)[0].item()
+                    var_array[j] = self.var_dict[keys_list[idx]]
+                else:
+                    X_obs = X_obs.reshape(1, -1)
 
-            if self.cuda:
-                X_obs = X_obs.to(device="cuda")
+                    if self.cuda:
+                        X_obs = X_obs.to(device="cuda")
 
-            # generating n_samples samples from the posterior
-            theta_pos = self.sbi_score.posterior.sample(
-                (n_samples,),
-                x=X_obs,
-                show_progress_bars=False,
-            )
+                    # generating n_samples samples from the posterior
+                    theta_pos = self.sbi_score.posterior.sample(
+                        (n_samples,),
+                        x=X_obs,
+                        show_progress_bars=False,
+                    )
 
-            # computing the score for each sample
-            res_theta = self.sbi_score.compute(X_obs, theta_pos, one_X=True)
-            var_array[j] = np.var(res_theta)
-            j += 1
+                    # computing the score for each sample
+                    res_theta = self.sbi_score.compute(X_obs, theta_pos, one_X=True)
+                    var_array[j] = np.var(res_theta)
+
+                    self.var_dict[X_obs.clone().detach()] = var_array[j]
+                j += 1
 
         return var_array
 
@@ -388,7 +406,7 @@ class LocartInf(BaseEstimator):
 
         return cutoff
 
-    def cutoff_uncertainty(self, X_test, beta=0.05):
+    def cutoff_uncertainty(self, X_test, beta=0.05, n_samples=1000, dict_verbose=False):
         """
         Compute the confidence interval for each cutoff
 
@@ -403,13 +421,19 @@ class LocartInf(BaseEstimator):
         cutoff_CI = np.zeros((X_test.shape[0], 2))
         k = 0
         if self.cart_type == "CART":
+
+            if self.weighting:
+                # generating n_samples samples from the posterior
+                w = self.compute_variance(X_test, n_samples=n_samples, dict_verbose=dict_verbose)
+                X_test = np.concatenate((X_test, w.reshape(-1, 1)), axis=1)
+
             for X in X_test:
                 local_res = self.res[
                     self.leafs_idx == self.cart.apply(X.reshape(1, -1))[0]
                 ]
 
                 n = local_res.shape[0]
-                q = 1 - self.alpha
+                q = np.ceil((n + 1) * (1 - self.alpha)) / n
 
                 # Search over a small range of upper and lower order statistics for the
                 # closest coverage to 1-alpha (but not less than it, if possible).
@@ -916,7 +940,7 @@ class CDFSplit(BaseEstimator):
                     x=X,
                     show_progress_bars=False,
                 )
-                self.sample_dict[X] = theta_pos
+                self.sample_dict[X.clone().detach()] = theta_pos
 
                 scores = self.sbi_score.compute(X, theta_pos, one_X=True)
 
@@ -948,7 +972,7 @@ class CDFSplit(BaseEstimator):
                     x=X,
                     show_progress_bars=False,
                 )
-                self.sample_dict[X] = theta_pos
+                self.sample_dict[X.clone().detach()] = theta_pos
 
                 scores = self.sbi_score.compute(X, theta_pos, one_X=True)
 
