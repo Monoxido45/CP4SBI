@@ -279,6 +279,7 @@ def compare_uncertainty_regions(task_name,
         X_obs = task.get_observation(num_observation=1)
         first_entry = next(iter(X_dict))
         true_post_samples = X_dict[first_entry][:, :2]
+        print(true_post_samples)
 
     uncertainty_map_locart, locart_mask = {}, {}
     oracle_mask, mae_dict_locart = {}, {}
@@ -446,37 +447,70 @@ def plot_uncertainty_regions(
         locart_mask_obs = locart_mask_dict[B]
         real_mask_obs = real_mask_dict[B]
 
-        ax_locart.contour(
-            locart_mask_obs.T,
-            levels=[0.5],
-            extent=(-1, 1, -1, 1),
-            colors="dodgerblue",
-            linewidths=2,
-            alpha=1.0,
-        )
-        ax_locart.contourf(
-            locart_unc.T,
-            levels=[0.99, 1.01],
-            extent=(-1, 1, -1, 1),
-            colors="lime",
-            linewidths=2,
-            alpha=0.25,
-        )
-        ax_locart.contourf(
-            locart_unc.T,
-            levels=[0.49, 0.51],
-            extent=(-1, 1, -1, 1),
-            colors="darkorange",
-            alpha=0.8,
-        )
-        ax_locart.contour(
-            real_mask_obs.T,
-            levels=[0.5],
-            extent=(-1, 1, -1, 1),
-            colors="grey",
-            linewidths=2,
-            alpha=1.0,
-        )
+        if task_name == "sir" or task_name == "lotka_volterra":
+            ax_locart.contour(
+                locart_mask_obs.T,
+                levels=[0.5],
+                extent=(x_lims[0], x_lims[1], y_lims[0], y_lims[1]),
+                colors="dodgerblue",
+                linewidths=2,
+                alpha=1.0,
+            )
+            ax_locart.contourf(
+                locart_unc.T,
+                levels=[0.99, 1.01],
+                extent=(x_lims[0], x_lims[1], y_lims[0], y_lims[1]),
+                colors="lime",
+                linewidths=2,
+                alpha=0.25,
+            )
+            ax_locart.contourf(
+                locart_unc.T,
+                levels=[0.49, 0.51],
+                extent=(x_lims[0], x_lims[1], y_lims[0], y_lims[1]),
+                colors="darkorange",
+                alpha=0.8,
+            )
+            ax_locart.contour(
+                real_mask_obs.T,
+                levels=[0.5],
+                extent=(x_lims[0], x_lims[1], y_lims[0], y_lims[1]),
+                colors="grey",
+                linewidths=2,
+                alpha=1.0,
+            )
+        else:
+            ax_locart.contour(
+                locart_mask_obs.T,
+                levels=[0.5],
+                extent=(-1, 1, -1, 1),
+                colors="dodgerblue",
+                linewidths=2,
+                alpha=1.0,
+            )
+            ax_locart.contourf(
+                locart_unc.T,
+                levels=[0.99, 1.01],
+                extent=(-1, 1, -1, 1),
+                colors="lime",
+                linewidths=2,
+                alpha=0.25,
+            )
+            ax_locart.contourf(
+                locart_unc.T,
+                levels=[0.49, 0.51],
+                extent=(-1, 1, -1, 1),
+                colors="darkorange",
+                alpha=0.8,
+            )
+            ax_locart.contour(
+                real_mask_obs.T,
+                levels=[0.5],
+                extent=(-1, 1, -1, 1),
+                colors="grey",
+                linewidths=2,
+                alpha=1.0,
+            )
         ax_locart.set_title(f"LOCART, B={B}")
         ax_locart.set_xlabel(r"$\theta_1$")
         ax_locart.set_ylabel(r"$\theta_2$")
@@ -639,13 +673,13 @@ plot_uncertainty_regions(all_results_list, x_lims, y_lims, task_name = "bernoull
 task_name = "sir"
 # generating grid of thetas
 theta_1 = torch.linspace(0.45, 0.75, 3000)
-theta_2 = torch.linspace(0.125, 0.25, 3000)
+theta_2 = torch.linspace(0.05, 0.35, 3000)
 theta_grid = torch.cartesian_prod(theta_1, theta_2)
 
 all_results_list = compare_uncertainty_regions(
     task_name, 
     theta_grid = theta_grid, 
-    theta_len = len(theta),
+    theta_len = len(theta_1),
     B_train = 20000,
     X_str=True,
     seed = 750,)
@@ -653,27 +687,28 @@ all_results_list = compare_uncertainty_regions(
 with open(f"all_results_list_{task_name}.pkl", "wb") as f:
     pickle.dump(all_results_list, f)
 
-y_lims = [0.12, 0.25]
-x_lims = [0.6, 0.7]
+y_lims = [0.05, 0.35]
+x_lims = [0.45, 0.75]
 plot_uncertainty_regions(all_results_list, x_lims, y_lims, task_name = "sir")
 
 task_name = "lotka_volterra"
 # generating grid of thetas
-theta = torch.linspace(0.005, 2.005, 3000)
-theta_grid = torch.cartesian_prod(theta, theta)
+theta_1 = torch.linspace(0.45, 1.15, 3000)
+theta_2 = torch.linspace(0.015, 0.35, 3000)
+theta_grid = torch.cartesian_prod(theta_1, theta_2)
 
 all_results_list = compare_uncertainty_regions(
     task_name, 
     theta_grid = theta_grid, 
-    theta_len = len(theta),
+    theta_len = len(theta_1),
     B_train = 20000,
     X_str=True,
-    seed = 750,)
+    seed = 850,)
 
 with open(f"all_results_list_{task_name}.pkl", "wb") as f:
     pickle.dump(all_results_list, f)
 
-y_lims = [0, 1.15]
-x_lims = [0, 1.15]
+y_lims = [0.05, 0.35]
+x_lims = [0.45, 1.15]
 plot_uncertainty_regions(all_results_list, x_lims, y_lims, task_name = "lotka_volterra")
 
