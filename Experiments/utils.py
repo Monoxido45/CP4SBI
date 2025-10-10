@@ -94,9 +94,9 @@ def train_sbi_amortized(
 
             if save_fname is not None:
                 # saving the results into a file
-                parameters_approx = inference._neural_net.state_dict()
+                parameters_approx = inference_obj._neural_net.state_dict()
                 torch.save(parameters_approx, save_fname + f'_pars_{pars[0]}{pars[1]}.pkl')
-            return dens_list, inf_list
+        return dens_list, inf_list
 
 
 def train_sbi_multiround(
