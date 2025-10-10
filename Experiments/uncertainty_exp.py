@@ -496,7 +496,7 @@ def plot_uncertainty_regions(
     fig.legend(
         handles=legend_elements,
         loc="upper center",
-        bbox_to_anchor=(0.5, 1.005),
+        bbox_to_anchor=(0.5, 0.995),
         ncol=len(legend_elements),
         frameon=False,
     )
@@ -638,8 +638,9 @@ plot_uncertainty_regions(all_results_list, x_lims, y_lims, task_name = "bernoull
 
 task_name = "sir"
 # generating grid of thetas
-theta = torch.linspace(-0.05, 2.05, 3000)
-theta_grid = torch.cartesian_prod(theta, theta)
+theta_1 = torch.linspace(0.45, 0.75, 3000)
+theta_2 = torch.linspace(0.125, 0.25, 3000)
+theta_grid = torch.cartesian_prod(theta_1, theta_2)
 
 all_results_list = compare_uncertainty_regions(
     task_name, 
