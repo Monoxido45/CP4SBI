@@ -129,20 +129,21 @@ class KDE_HPDScore(sbi_Scores):
 
 # HPD score
 class HPDScore(sbi_Scores):
-    def fit(self, X=None, thetas=None, **kwargs):
+    def fit(self, X=None, theta=None, **kwargs):
         # setting up model for SBI package
         if not self.is_fitted:
             if not isinstance(X, torch.Tensor) or X.dtype != torch.float32:
                 X = torch.tensor(X, dtype=torch.float32)
-            if not isinstance(thetas, torch.Tensor) or thetas.dtype != torch.float32:
-                thetas = torch.tensor(thetas, dtype=torch.float32)
-            self.inference_obj.append_simulations(thetas, X)
+            if not isinstance(theta, torch.Tensor) or theta.dtype != torch.float32:
+                theta = torch.tensor(theta, dtype=torch.float32)
+            self.inference_obj.append_simulations(theta, X)
             density = self.inference_obj.train()
             self.posterior = self.inference_obj.build_posterior(density, **kwargs)
         else:
             if self.density is None:
                 self.posterior = self.inference_obj.build_posterior(**kwargs)
             else:
+                print("Using pre-trained density estimator")
                 density = deepcopy(self.density)
                 self.posterior = self.inference_obj.build_posterior(density, **kwargs)
         return self
@@ -195,15 +196,15 @@ class HPDScore(sbi_Scores):
 
 # Waldo score
 class WALDOScore(sbi_Scores):
-    def fit(self, X=None, thetas=None, **kwargs):
+    def fit(self, X=None, theta=None, **kwargs):
         # setting up model for SBI package
         if not self.is_fitted:
             if not isinstance(X, torch.Tensor) or X.dtype != torch.float32:
                 X = torch.tensor(X, dtype=torch.float32)
-            if not isinstance(thetas, torch.Tensor) or thetas.dtype != torch.float32:
-                thetas = torch.tensor(thetas, dtype=torch.float32)
+            if not isinstance(theta, torch.Tensor) or theta.dtype != torch.float32:
+                theta = torch.tensor(theta, dtype=torch.float32)
             if self.density is None:
-                self.inference_obj.append_simulations(thetas, X)
+                self.inference_obj.append_simulations(theta, X)
                 density = self.inference_obj.train()
             else:
                 density = deepcopy(self.density)

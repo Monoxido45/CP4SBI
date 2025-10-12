@@ -47,6 +47,7 @@ class LocartInf(BaseEstimator):
         """
         self.density = density
         self.base_inference = base_inference
+        self.is_fitted = is_fitted
         self.sbi_score = sbi_score(
             base_inference,
             is_fitted=is_fitted,
