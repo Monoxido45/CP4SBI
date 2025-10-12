@@ -98,8 +98,8 @@ with open('Experiments/inf_list_jrnmm.pkl', 'rb') as f:
 
 
 # definning calibration budgets
-cal_budgets = [1000, 2000, 4000, 6000, 8000]
-min_samples_leaf = [150, 300, 300, 500, 750]
+cal_budgets = [1000, 2000, 4000, 8000, 10000]
+min_samples_leaf = [150, 300, 300, 500, 500]
 # combination list for nuisance parameters
 comb_list = [[0, 1], [0, 2], [1, 2]]
 device = "cpu"
@@ -217,88 +217,88 @@ def plot_uncertainty_regions_grid(
     locart_masks, 
     theta_grid_list, 
     theta_len,
+    x_lims_1,
+    y_lims_1,
     x_lims = [[10.0, 250.0], [10.0, 250.0], [50.0, 500.0]],
-    y_lims = [[50.0, 500.0], [100.0, 1000.0], [100.0, 1000.0]],
-    theta_names=["$\theta_1$", "$\theta_2$", "$\theta_3$"],
+    y_lims = [[50.0, 500.0], [100.0, 5000.0], [100.0, 5000.0]],
+    theta_names=["θ₁", "θ₂", "θ₃"],
     cal_budgets=None,
-    save_prefix="uncertainty_regions_jrnmm"
+    save_prefix="uncertainty_regions_jrnmm",
     ):
     """
     Plots uncertainty regions for each calibration budget and each theta pair.
-    Each row corresponds to a calibration budget, each column to a theta pair.
+    Each row corresponds to a theta pair, each column to a calibration budget.
     """
 
     if cal_budgets is None:
         cal_budgets = sorted(list(uncertainty_map.keys()))
-        comb_labels = [
+    comb_labels = [
         f"{theta_names[0]} vs {theta_names[1]}",
         f"{theta_names[0]} vs {theta_names[2]}",
         f"{theta_names[1]} vs {theta_names[2]}"
-        ]
+    ]
 
     plt.style.use('dark_background')
     fig, axes = plt.subplots(
-    len(cal_budgets), 3, figsize=(15, 5 * len(cal_budgets)),
-    squeeze=False
+        3, len(cal_budgets), figsize=(5 * len(cal_budgets), 15),
+        squeeze=False
     )
     fig.patch.set_facecolor('black')
 
-    for row_idx, B in enumerate(cal_budgets):
-        i = 0
-        for col_idx in range(3):
+    for row_idx in range(3):
+        for col_idx, B in enumerate(cal_budgets):
             ax = axes[row_idx, col_idx]
-            locart_unc = uncertainty_map[B][col_idx]
-            locart_mask_obs = locart_masks[B][col_idx]
-            grid = theta_grid_list[col_idx]
-            x = grid[:, 0].reshape(theta_len, theta_len)
-            y = grid[:, 1].reshape(theta_len, theta_len)
+            locart_unc = uncertainty_map[B][row_idx]
+            locart_mask_obs = locart_masks[B][row_idx]
 
             # Plot mask contour
             ax.contour(
-            x, y, locart_mask_obs.T,
-            levels=[0.5],
-            colors="dodgerblue",
-            linewidths=2,
-            alpha=1.0,
+                locart_mask_obs.T,
+                extent=(x_lims[row_idx][0], x_lims[row_idx][1], y_lims[row_idx][0], y_lims[row_idx][1]),
+                levels=[0.5],
+                colors="dodgerblue",
+                linewidths=2,
+                alpha=1.0,
             )
             # Plot inside region
             ax.contourf(
-            x, y, locart_unc.T,
-            levels=[0.99, 1.01],
-            colors="lime",
-            linewidths=2,
-            alpha=0.25,
+                locart_unc.T,
+                extent=(x_lims[row_idx][0], x_lims[row_idx][1], y_lims[row_idx][0], y_lims[row_idx][1]),
+                levels=[0.99, 1.01],
+                colors="lime",
+                linewidths=2,
+                alpha=0.25,
             )
             # Plot underterminate region
             ax.contourf(
-            x, y, locart_unc.T,
-            levels=[0.49, 0.51],
-            colors="darkorange",
-            alpha=0.8,
+                locart_unc.T,
+                extent=(x_lims[row_idx][0], x_lims[row_idx][1], y_lims[row_idx][0], y_lims[row_idx][1]),
+                levels=[0.49, 0.51],
+                colors="darkorange",
+                alpha=0.8,
             )
 
-            ax.set_title(f"{comb_labels[col_idx]}, B={B}")
-            ax.set_xlabel(comb_labels[col_idx].split(" vs ")[0])
-            ax.set_ylabel(comb_labels[col_idx].split(" vs ")[1])
-            ax.set_xlim(x_lims[i][0], x_lims[i][1])
-            ax.set_ylim(y_lims[i][0], y_lims[i][1])
+            ax.set_title(f"{comb_labels[row_idx]}, B={B}", fontsize=14)
+            ax.set_xlabel(comb_labels[row_idx].split(" vs ")[0], fontsize=12)
+            ax.set_ylabel(comb_labels[row_idx].split(" vs ")[1], fontsize=12)
+            ax.set_xlim(x_lims_1[row_idx][0], x_lims_1[row_idx][1])
+            ax.set_ylim(y_lims_1[row_idx][0], y_lims_1[row_idx][1])
 
-            del locart_unc, locart_mask_obs, ax, grid, x, y
+            del locart_unc, locart_mask_obs, ax
             gc.collect()
             torch.cuda.empty_cache()
-            i += 1
 
     legend_elements = [
-    Patch(facecolor="none", edgecolor="dodgerblue", linewidth=2, label=r"$\mathbf{CP4SBI\text{-}LOCART}$", alpha=0.75),
-    Patch(facecolor="lime", edgecolor="none", linewidth=2, label="Inside region", alpha=0.25),
-    Patch(facecolor="darkorange", edgecolor="none", linewidth=2, label="Underterminate region", alpha=0.8),
+        Patch(facecolor="none", edgecolor="dodgerblue", linewidth=2, label="CP4SBI-LOCART", alpha=0.75),
+        Patch(facecolor="lime", edgecolor="none", linewidth=2, label="Inside region", alpha=0.25),
+        Patch(facecolor="darkorange", edgecolor="none", linewidth=2, label="Underterminate region", alpha=0.8),
     ]
     fig.legend(
-    handles=legend_elements,
-    loc="upper center",
-    bbox_to_anchor=(0.5, 0.995),
-    ncol=len(legend_elements),
-    frameon=False,
+        handles=legend_elements,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 0.995),
+        ncol=len(legend_elements),
+        frameon=False,
     )
 
     plt.tight_layout()
@@ -312,9 +312,22 @@ def plot_uncertainty_regions_grid(
     gc.collect()
     torch.cuda.empty_cache()
 
+# Count the number of entries equal to 1 in one uncertainty map (for example, for the largest calibration budget and first theta pair)
+B = cal_budgets[-1]  # Use the largest calibration budget
+row_idx = 2          # Use the second theta pair (θ₂ vs θ₃)
+uncertainty_region = uncertainty_map[B][row_idx]
+num_entries_equal_1 = np.sum(uncertainty_region == 1)
+print(f"Number of entries equal to 1 in uncertainty_map[{B}][{row_idx}]: {num_entries_equal_1}")
+
+x_lims = [[100, 160.0], [100, 160.0], [200.0, 325.0]]
+y_lims = [[200, 300.0], [1750, 2350.0], [1750, 2350.0]]
+
 plot_uncertainty_regions_grid(
     uncertainty_map,
     locart_masks,
     theta_grid_list,
     theta_len = 3000,
+    cal_budgets=[1000, 2000, 4000, 6000],
+    x_lims_1=x_lims,
+    y_lims_1=y_lims,
 )
