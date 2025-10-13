@@ -23,8 +23,8 @@ from matplotlib.patches import Patch
 import os
 
 # setting seeds for reproducibility
-torch.manual_seed(125)
-torch.cuda.manual_seed(125)
+torch.manual_seed(75)
+torch.cuda.manual_seed(75)
 
 def model(theta):
     theta = theta.numpy()
@@ -98,8 +98,8 @@ with open('Experiments/inf_list_jrnmm.pkl', 'rb') as f:
 
 
 # definning calibration budgets
-cal_budgets = [1000, 2000, 4000, 8000, 10000]
-min_samples_leaf = [150, 300, 300, 500, 500]
+cal_budgets = [2000, 4000, 6000, 8000]
+min_samples_leaf = [300, 300, 300, 300]
 # combination list for nuisance parameters
 comb_list = [[0, 1], [0, 2], [1, 2]]
 device = "cpu"
@@ -215,8 +215,6 @@ else:
 def plot_uncertainty_regions_grid(
     uncertainty_map, 
     locart_masks, 
-    theta_grid_list, 
-    theta_len,
     x_lims_1,
     y_lims_1,
     x_lims = [[10.0, 250.0], [10.0, 250.0], [50.0, 500.0]],
@@ -319,15 +317,96 @@ uncertainty_region = uncertainty_map[B][row_idx]
 num_entries_equal_1 = np.sum(uncertainty_region == 1)
 print(f"Number of entries equal to 1 in uncertainty_map[{B}][{row_idx}]: {num_entries_equal_1}")
 
-x_lims = [[100, 160.0], [100, 160.0], [200.0, 325.0]]
-y_lims = [[200, 300.0], [1750, 2350.0], [1750, 2350.0]]
+x_lims_1 = [[125, 142.5], [125, 145.0], [160.0, 250.0]]
+y_lims_1 = [[170, 260.0], [1750, 2350.0], [1750, 2350.0]]
 
 plot_uncertainty_regions_grid(
     uncertainty_map,
     locart_masks,
-    theta_grid_list,
-    theta_len = 3000,
-    cal_budgets=[1000, 2000, 4000, 6000],
-    x_lims_1=x_lims,
-    y_lims_1=y_lims,
+    cal_budgets=[2000, 4000, 6000],
+    x_lims_1=x_lims_1,
+    y_lims_1=y_lims_1,
 )
+
+################# Plot to be used in the paper #################
+# Plotting only for the largest calibration budget, all projections in the same row
+B = cal_budgets[-1]  # Largest calibration budget
+comb_labels = [
+    "θ₁ vs θ₂",
+    "θ₁ vs θ₃",
+    "θ₂ vs θ₃"
+]
+x_lims_1 = [[115, 155], [115, 155.0], [135.0, 255.0]]
+y_lims_1 = [[135, 255.0], [1700, 2400.0], [1700, 2400.0]]
+
+x_lims = [[10.0, 250.0], [10.0, 250.0], [50.0, 500.0]]
+y_lims = [[50.0, 500.0], [100.0, 5000.0], [100.0, 5000.0]]
+
+plt.style.use('dark_background')
+fig, axes = plt.subplots(1, 3, figsize=(15, 5), squeeze=False)
+fig.patch.set_facecolor('black')
+
+for idx in range(3):
+    ax = axes[0, idx]
+    locart_unc = uncertainty_map[B][idx]
+    locart_mask_obs = locart_masks[B][idx]
+
+    ax.contour(
+        locart_mask_obs.T,
+        extent=(x_lims[idx][0], x_lims[idx][1], y_lims[idx][0], y_lims[idx][1]),
+        levels=[0.5],
+        colors="dodgerblue",
+        linewidths=2,
+        alpha=1.0,
+    )
+    ax.contourf(
+        locart_unc.T,
+        extent=(x_lims[idx][0], x_lims[idx][1], y_lims[idx][0], y_lims[idx][1]),
+        levels=[0.99, 1.01],
+        colors="lime",
+        linewidths=2,
+        alpha=0.25,
+    )
+    ax.contourf(
+        locart_unc.T,
+        extent=(x_lims[idx][0], x_lims[idx][1], y_lims[idx][0], y_lims[idx][1]),
+        levels=[0.49, 0.51],
+        colors="darkorange",
+        alpha=0.8,
+    )
+
+    ax.set_title(f"{comb_labels[idx]}, B={B}", fontsize=14)
+    ax.set_xlabel(comb_labels[idx].split(" vs ")[0], fontsize=12)
+    ax.set_ylabel(comb_labels[idx].split(" vs ")[1], fontsize=12)
+    ax.set_xlim(x_lims_1[idx][0], x_lims_1[idx][1])
+    ax.set_ylim(y_lims_1[idx][0], y_lims_1[idx][1])
+
+    del locart_unc, locart_mask_obs, ax
+    gc.collect()
+    torch.cuda.empty_cache()
+
+legend_elements = [
+    Patch(facecolor="none", edgecolor="dodgerblue", linewidth=2, label="CP4SBI-LOCART", alpha=0.75),
+    Patch(facecolor="lime", edgecolor="none", linewidth=2, label="Inside region", alpha=0.25),
+    Patch(facecolor="darkorange", edgecolor="none", linewidth=2, label="Underterminate region", alpha=0.8),
+]
+fig.legend(
+    handles=legend_elements,
+    loc="upper center",
+    bbox_to_anchor=(0.5, 1.005),
+    ncol=len(legend_elements),
+    frameon=False,
+)
+
+plt.tight_layout()
+plt.subplots_adjust(top=0.825)
+plt.rcParams.update({"font.size": 16})
+fig.savefig(f"uncertainty_regions_jrnmm_largest_budget_row.pdf", dpi=300)
+
+plt.close(fig)
+gc.collect()
+del fig, axes, legend_elements
+gc.collect()
+torch.cuda.empty_cache()
+
+

@@ -25,6 +25,9 @@ torch.manual_seed(125)
 torch.cuda.manual_seed(125)
 alpha = 0.1
 
+# analysing some specific budgets
+cal_budgets = [1000, 2000, 4000]
+
 
 task = sbibm.get_task("sir")
 simulator = task.get_simulator()
@@ -426,22 +429,28 @@ def compare_uncertainty_regions(task_name,
 def plot_uncertainty_regions(
         all_results_list, 
         x_lims, 
-        y_lims, 
-        task_name)   :
+        y_lims,
+        task_name,
+        cal_budgets=None,
+        ):
+
     # Only LOCART results are available, so update unpacking and plotting accordingly
     unc_dict_locart = all_results_list[0]
     locart_mask_dict = all_results_list[1]
     real_mask_dict = all_results_list[2]
 
+    if cal_budgets is None:
+        cal_budgets = sorted(list(unc_dict_locart.keys()))
+
     plt.style.use('dark_background')
-    fig, axes = plt.subplots(1, len(unc_dict_locart), figsize=(5 * len(unc_dict_locart), 5))
+    fig, axes = plt.subplots(1, len(cal_budgets), figsize=(5 * len(cal_budgets), 5))
     fig.patch.set_facecolor('black')
 
     # If only one budget, axes is not an array
     if len(unc_dict_locart) == 1:
         axes = [axes]
 
-    for col_idx, B in enumerate(sorted(unc_dict_locart.keys())):
+    for col_idx, B in enumerate(cal_budgets):
         ax_locart = axes[col_idx]
         locart_unc = unc_dict_locart[B]
         locart_mask_obs = locart_mask_dict[B]
@@ -562,6 +571,10 @@ all_results_list = compare_uncertainty_regions(
 with open(f"all_results_list_{task_name}.pkl", "wb") as f:
     pickle.dump(all_results_list, f)
 
+# use only if results are already saved
+with open(f"all_results_list_{task_name}.pkl", "rb") as f:
+    all_results_list = pickle.load(f)
+
 y_lims = [-0.15, 1.25]
 x_lims = [-0.55,1.0]
 plot_uncertainty_regions(
@@ -569,6 +582,7 @@ plot_uncertainty_regions(
     x_lims, 
     y_lims, 
     task_name = "gaussian_linear_uniform",
+    cal_budgets=cal_budgets,
     )
 
 # testing two moons also
@@ -587,9 +601,19 @@ all_results_list = compare_uncertainty_regions(
 with open(f"all_results_list_{task_name}.pkl", "wb") as f:
     pickle.dump(all_results_list, f)
 
+# use only if results are already saved
+with open(f"all_results_list_{task_name}.pkl", "rb") as f:
+    all_results_list = pickle.load(f)
+
 y_lims = [-0.55, 0.]
 x_lims = [-0.15, 0.65]
-plot_uncertainty_regions(all_results_list, x_lims, y_lims, task_name = "two_moons")
+plot_uncertainty_regions(
+    all_results_list, 
+    x_lims, 
+    y_lims, 
+    task_name = "two_moons",
+    cal_budgets=cal_budgets,
+    )
 
 # testing for gaussian mixture
 task_name = "gaussian_mixture"
@@ -608,9 +632,19 @@ all_results_list = compare_uncertainty_regions(
 with open(f"all_results_list_{task_name}.pkl", "wb") as f:
     pickle.dump(all_results_list, f)
 
+# use only if results are already saved
+with open(f"all_results_list_{task_name}.pkl", "rb") as f:
+    all_results_list = pickle.load(f)
+
 y_lims = [-1.05, 1.05]
 x_lims = [-1.2, 1.15]
-plot_uncertainty_regions(all_results_list, x_lims, y_lims, task_name = "gaussian_mixture")
+plot_uncertainty_regions(
+    all_results_list, 
+    x_lims, 
+    y_lims, 
+    task_name = "gaussian_mixture",
+    cal_budgets=cal_budgets,
+    )
 
 # testing for gaussian linear
 task_name = "gaussian_linear"
@@ -627,9 +661,19 @@ all_results_list = compare_uncertainty_regions(
 with open(f"all_results_list_{task_name}.pkl", "wb") as f:
     pickle.dump(all_results_list, f)
 
+# use only if results are already saved
+with open(f"all_results_list_{task_name}.pkl", "rb") as f:
+    all_results_list = pickle.load(f)
+
 y_lims = [-0.3, 0.3]
 x_lims = [-0.15, 0.55]
-plot_uncertainty_regions(all_results_list, x_lims, y_lims, task_name = "gaussian_linear")
+plot_uncertainty_regions(
+    all_results_list, 
+    x_lims, 
+    y_lims, 
+    task_name = "gaussian_linear",
+    cal_budgets=cal_budgets,
+    )
 
 task_name = "slcp"
 # generating grid of thetas
@@ -647,9 +691,19 @@ all_results_list = compare_uncertainty_regions(
 with open(f"all_results_list_{task_name}.pkl", "wb") as f:
     pickle.dump(all_results_list, f)
 
+# use only if results are already saved
+with open(f"all_results_list_{task_name}.pkl", "rb") as f:
+    all_results_list = pickle.load(f)
+
 y_lims = [-1.15, 1.15]
 x_lims = [-1.15, 1.15]
-plot_uncertainty_regions(all_results_list, x_lims, y_lims, task_name = "slcp")
+plot_uncertainty_regions(
+    all_results_list, 
+    x_lims, 
+    y_lims, 
+    task_name = "slcp",
+    cal_budgets=cal_budgets,
+    )
 
 task_name = "bernoulli_glm"
 # generating grid of thetas
@@ -666,9 +720,19 @@ all_results_list = compare_uncertainty_regions(
 with open(f"all_results_list_{task_name}.pkl", "wb") as f:
     pickle.dump(all_results_list, f)
 
+# use only if results are already saved
+with open(f"all_results_list_{task_name}.pkl", "rb") as f:
+    all_results_list = pickle.load(f)
+
 y_lims = [0.2, 1.05]
 x_lims = [-0.1, 0.65]
-plot_uncertainty_regions(all_results_list, x_lims, y_lims, task_name = "bernoulli_glm")
+plot_uncertainty_regions(
+    all_results_list, 
+    x_lims, 
+    y_lims, 
+    task_name = "bernoulli_glm",
+    cal_budgets=cal_budgets,
+    )
 
 task_name = "sir"
 # generating grid of thetas
@@ -687,9 +751,19 @@ all_results_list = compare_uncertainty_regions(
 with open(f"all_results_list_{task_name}.pkl", "wb") as f:
     pickle.dump(all_results_list, f)
 
+# use only if results are already saved
+with open(f"all_results_list_{task_name}.pkl", "rb") as f:
+    all_results_list = pickle.load(f)
+
 y_lims = [0.05, 0.35]
 x_lims = [0.45, 0.75]
-plot_uncertainty_regions(all_results_list, x_lims, y_lims, task_name = "sir")
+plot_uncertainty_regions(
+    all_results_list, 
+    x_lims, 
+    y_lims, 
+    task_name = "sir",
+    cal_budgets=cal_budgets,
+    )
 
 task_name = "lotka_volterra"
 # generating grid of thetas
@@ -708,7 +782,17 @@ all_results_list = compare_uncertainty_regions(
 with open(f"all_results_list_{task_name}.pkl", "wb") as f:
     pickle.dump(all_results_list, f)
 
+# use only if results are already saved
+with open(f"all_results_list_{task_name}.pkl", "rb") as f:
+    all_results_list = pickle.load(f)
+
 y_lims = [0.05, 0.35]
 x_lims = [0.45, 1.15]
-plot_uncertainty_regions(all_results_list, x_lims, y_lims, task_name = "lotka_volterra")
+plot_uncertainty_regions(
+    all_results_list, 
+    x_lims, 
+    y_lims, 
+    task_name = "lotka_volterra",
+    cal_budgets=cal_budgets,
+    )
 
