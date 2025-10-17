@@ -332,9 +332,9 @@ plot_uncertainty_regions_grid(
 # Plotting only for the largest calibration budget, all projections in the same row
 B = cal_budgets[-1]  # Largest calibration budget
 comb_labels = [
-    "θ₁ vs θ₂",
-    "θ₁ vs θ₃",
-    "θ₂ vs θ₃"
+    r"$\theta_1$ vs $\theta_2$",
+    r"$\theta_1$ vs $\theta_3$",
+    r"$\theta_2$ vs $\theta_3$"
 ]
 x_lims_1 = [[115, 155], [115, 155.0], [135.0, 255.0]]
 y_lims_1 = [[135, 255.0], [1700, 2400.0], [1700, 2400.0]]
@@ -345,6 +345,8 @@ y_lims = [[50.0, 500.0], [100.0, 5000.0], [100.0, 5000.0]]
 plt.style.use('dark_background')
 fig, axes = plt.subplots(1, 3, figsize=(15, 5), squeeze=False)
 fig.patch.set_facecolor('black')
+plt.rcParams.update({"font.size": 16})
+plt.rcParams.update({"legend.fontsize": 14})
 
 for idx in range(3):
     ax = axes[0, idx]
@@ -375,9 +377,11 @@ for idx in range(3):
         alpha=0.8,
     )
 
-    ax.set_title(f"{comb_labels[idx]}, B={B}", fontsize=14)
-    ax.set_xlabel(comb_labels[idx].split(" vs ")[0], fontsize=12)
-    ax.set_ylabel(comb_labels[idx].split(" vs ")[1], fontsize=12)
+    ax.set_title(f"{comb_labels[idx]}, B={B}", fontsize=16)
+    xlabel = comb_labels[idx].split(" vs ")[0]
+    ylabel = comb_labels[idx].split(" vs ")[1]
+    ax.set_xlabel(xlabel, fontsize=16)
+    ax.set_ylabel(ylabel, fontsize=16)
     ax.set_xlim(x_lims_1[idx][0], x_lims_1[idx][1])
     ax.set_ylim(y_lims_1[idx][0], y_lims_1[idx][1])
 
@@ -386,9 +390,9 @@ for idx in range(3):
     torch.cuda.empty_cache()
 
 legend_elements = [
-    Patch(facecolor="none", edgecolor="dodgerblue", linewidth=2, label="CP4SBI-LOCART", alpha=0.75),
+    Patch(facecolor="none", edgecolor="dodgerblue", linewidth=2, label="CP4SBI", alpha=0.75),
     Patch(facecolor="lime", edgecolor="none", linewidth=2, label="Inside region", alpha=0.25),
-    Patch(facecolor="darkorange", edgecolor="none", linewidth=2, label="Underterminate region", alpha=0.8),
+    Patch(facecolor="darkorange", edgecolor="none", linewidth=2, label="Undetermined region", alpha=0.8),
 ]
 fig.legend(
     handles=legend_elements,

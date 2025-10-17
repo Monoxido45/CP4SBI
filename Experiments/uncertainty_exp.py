@@ -41,7 +41,8 @@ def compare_uncertainty_regions(task_name,
                                 theta_len,
                                 B_list = [1000, 2000, 4000, 6000],
                                 B_train = 10000,
-                                device = "cpu", 
+                                device = "cpu",
+                                strategy = "assymetric", 
                                 min_samples_leaf=[150,300,300,300],
                                 X_str = False,
                                 seed = 125,):
@@ -365,6 +366,7 @@ def compare_uncertainty_regions(task_name,
             X=X_obs,
             thetas=theta_grid,
             beta=0.1,
+            strategy=strategy,
         )
 
         print(bayes_conf_2d.cutoff_CI)
@@ -394,6 +396,7 @@ def compare_uncertainty_regions(task_name,
             X=X_obs,
             thetas=post_samples_2d.to(device=device),
             beta=0.1,
+            strategy=strategy,
         )
 
 
@@ -433,7 +436,6 @@ def plot_uncertainty_regions(
         task_name,
         cal_budgets=None,
         ):
-
     # Only LOCART results are available, so update unpacking and plotting accordingly
     unc_dict_locart = all_results_list[0]
     locart_mask_dict = all_results_list[1]
@@ -445,6 +447,8 @@ def plot_uncertainty_regions(
     plt.style.use('dark_background')
     fig, axes = plt.subplots(1, len(cal_budgets), figsize=(5 * len(cal_budgets), 5))
     fig.patch.set_facecolor('black')
+    plt.rcParams.update({"font.size": 16})
+    plt.rcParams.update({"legend.fontsize": 14})
 
     # If only one budget, axes is not an array
     if len(unc_dict_locart) == 1:
@@ -520,7 +524,7 @@ def plot_uncertainty_regions(
                 linewidths=2,
                 alpha=1.0,
             )
-        ax_locart.set_title(f"LOCART, B={B}")
+        ax_locart.set_title(f"CP4SBI, B={B}")
         ax_locart.set_xlabel(r"$\theta_1$")
         ax_locart.set_ylabel(r"$\theta_2$")
         ax_locart.set_ylim(y_lims[0], y_lims[1])
@@ -531,9 +535,9 @@ def plot_uncertainty_regions(
         torch.cuda.empty_cache()
 
     legend_elements = [
-        Patch(facecolor="none", edgecolor="dodgerblue", linewidth=2, label=r"$\mathbf{CP4SBI\text{-}LOCART}$", alpha=0.75),
+        Patch(facecolor="none", edgecolor="dodgerblue", linewidth=2, label=r"$\mathbf{CP4SBI}$", alpha=0.75),
         Patch(facecolor="lime", edgecolor="none", linewidth=2, label="Inside region", alpha=0.25),
-        Patch(facecolor="darkorange", edgecolor="none", linewidth=2, label="Underterminate region", alpha=0.8),
+        Patch(facecolor="darkorange", edgecolor="none", linewidth=2, label="Undetermined region", alpha=0.8),
         Patch(facecolor="none", edgecolor="grey", linewidth=2, label="Target region", alpha=1.0),
     ]
     fig.legend(
@@ -656,6 +660,7 @@ all_results_list = compare_uncertainty_regions(
     task_name, 
     theta_grid = theta_grid, 
     theta_len = len(theta),
+    B_train=5000,
     seed = 1250,)
 
 with open(f"all_results_list_{task_name}.pkl", "wb") as f:

@@ -407,7 +407,7 @@ class LocartInf(BaseEstimator):
 
         return cutoff
 
-    def cutoff_uncertainty(self, X_test, beta=0.05, n_samples=1000, dict_verbose=False):
+    def cutoff_uncertainty(self, X_test, beta=0.05, n_samples=1000, dict_verbose=False, strategy = "symmetric"):
         """
         Compute the confidence interval for each cutoff
 
@@ -436,28 +436,49 @@ class LocartInf(BaseEstimator):
                 n = local_res.shape[0]
                 q = np.ceil((n + 1) * (1 - self.alpha)) / n
 
-                # Search over a small range of upper and lower order statistics for the
-                # closest coverage to 1-alpha (but not less than it, if possible).
-                u = binom.ppf(1 - beta / 2, n, q).astype(int) + np.arange(-2, 3) + 1
-                l = binom.ppf(beta / 2, n, q).astype(int) + np.arange(-2, 3)
-                u[u > n] = np.iinfo(np.int64).max
-                l[l < 0] = np.iinfo(np.int64).min
+                if strategy == "symmetric":
+                    # Search over a small range of upper and lower order statistics for the
+                    # closest coverage to 1-alpha (but not less than it, if possible).
+                    u = binom.ppf(1 - beta / 2, n, q).astype(int) + np.arange(-2, 3) + 1
+                    l = binom.ppf(beta / 2, n, q).astype(int) + np.arange(-2, 3)
+                    
+                    u[u > n] = np.iinfo(np.int64).max
+                    l[l < 0] = np.iinfo(np.int64).min
 
-                coverage = np.array(
-                    [
-                        [binom.cdf(b - 1, n, q) - binom.cdf(a - 1, n, q) for b in u]
-                        for a in l
-                    ]
-                )
+                    coverage = np.array(
+                        [
+                            [binom.cdf(b - 1, n, q) - binom.cdf(a - 1, n, q) for b in u]
+                            for a in l
+                        ]
+                    )
 
-                if np.max(coverage) < 1 - beta:
-                    i = np.argmax(coverage)
+                    if np.max(coverage) < 1 - beta:
+                        i = np.argmax(coverage)
+                    else:
+                        i = np.argmin(coverage[coverage >= 1 - beta])
+
+                    # Return the order statistics
+                    u = np.repeat(u, 5)[i]
+                    l = np.repeat(l, 5)[i]
                 else:
-                    i = np.argmin(coverage[coverage >= 1 - beta])
-
-                # Return the order statistics
-                u = np.repeat(u, 5)[i]
-                l = np.repeat(l, 5)[i]
+                    # asymmetric interval
+                    u_candidates = binom.ppf(1 - beta / 2, n, q).astype(int) + np.arange(-2, 3) + 1
+                    u_candidates = u_candidates[u_candidates <= n]
+                    u = n  # fallback
+                    for candidate in np.sort(u_candidates):
+                        prob = 1 - binom.cdf(candidate - 1, n, q)
+                        if prob <= beta / 2:
+                            u = candidate
+                            break
+                    
+                    l_candidates = binom.ppf(beta / 2, n, q).astype(int) + np.arange(-2, 3)
+                    l_candidates = l_candidates[l_candidates >= 0]
+                    l = 0  # fallback
+                    for candidate in np.sort(l_candidates)[::-1]:
+                        prob = binom.cdf(candidate - 1, n, q)
+                        if prob <= beta / 2:
+                            l = candidate
+                            break
 
                 # ordering local res
                 order_local_res = np.sort(local_res)
@@ -741,7 +762,7 @@ class CDFSplit(BaseEstimator):
 
         return optim_ccp
 
-    def cutoff_uncertainty(self, X_test, B=2000, beta=0.05):
+    def cutoff_uncertainty(self, X_test, B=2000, beta=0.05, strategy="symmetric"):
         """
         Compute the bootstrap confidence interval for each cutoff
 
@@ -1197,15 +1218,16 @@ class BayCon:
         X_test,
         beta=0.05,
         B=2000,
+        strategy="symmetric",
     ):
         if self.conformal_method == "local":
             if self.locart is None:
                 raise RuntimeError(
                     "Conformal method must be calibrated before prediction"
                 )
-            cutoff_CI = self.locart.cutoff_uncertainty(X_test, beta=beta)
+            cutoff_CI = self.locart.cutoff_uncertainty(X_test, beta=beta, strategy=strategy)
         elif self.conformal_method == "CDF" or self.conformal_method == "CDF local":
-            cutoff_CI = self.cdf_split.cutoff_uncertainty(X_test, B=B, beta=beta)
+            cutoff_CI = self.cdf_split.cutoff_uncertainty(X_test, B=B, beta=beta, strategy=strategy)
 
         self.cutoff_CI = cutoff_CI
         return cutoff_CI
@@ -1217,6 +1239,7 @@ class BayCon:
         beta=0.05,
         B=2000,
         track_progress=True,
+        strategy="symmetric",
     ):
         """
         Compute the confidence interval for each cutoff
@@ -1233,7 +1256,7 @@ class BayCon:
         theta_dec = np.zeros((X.shape[0], thetas.shape[0]))
         i = 0
 
-        cutoff_CI = self.uncertainty_cutoff(X, beta=beta, B=B)
+        cutoff_CI = self.uncertainty_cutoff(X, beta=beta, B=B, strategy=strategy)
 
         if self.conformal_method == "local":
             sbi_score = self.locart.sbi_score
