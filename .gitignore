@@ -25,3 +25,8 @@ Results/*testing*
 *credible_regions*
 *illustration*
 *checkpoints*
+*uncertainty_regions*
+Results/volume_results/*results*
+*all_results_list*
+Experiments/*locart_masks*
+Experiments/*jrnmm_amortized*
