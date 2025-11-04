@@ -292,19 +292,19 @@ def compute_volume(
 
     if base_model == "NPE":
         # fitting NPE
-        inference = NPE(prior_NPE, device=device)
+        inference = NPE(prior_NPE, device=device, summary_writer=None)
         inference.append_simulations(
             theta_train,
             X_train,
-        ).train(summary_writer=None)
+        ).train()
 
     elif base_model == "NPSE":
         # fitting diffusion model
-        inference = NPSE(prior_NPE, device=device)
+        inference = NPSE(prior_NPE, device=device, summary_writer=None)
         inference.append_simulations(
             theta=theta_train.to(device),
             x=X_train.to(device),
-        ).train(summary_writer=None)
+        ).train()
 
     cuda = device == "cuda"
 
