@@ -369,7 +369,7 @@ def compute_coverage(
         inference.append_simulations(
             theta_train,
             X_train,
-        ).train()
+        ).train(summary_writer=None)
 
     elif base_model == "NPSE":
         # fitting diffusion model
@@ -377,7 +377,7 @@ def compute_coverage(
         inference.append_simulations(
             theta=theta_train.to(device),
             x=X_train.to(device),
-        ).train()
+        ).train(summary_writer=None)
 
     cuda = device == "cuda"
 
