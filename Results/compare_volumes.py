@@ -26,6 +26,27 @@ import argparse
 import pickle
 import os
 
+# for avoiding summary writter
+class MockSummaryWriter:
+    """
+    Um objeto 'SummaryWriter' falso que não faz nada.
+    Usado para enganar o sbi e impedi-lo de logar ou travar.
+    """
+    def add_scalar(self, *args, **kwargs):
+        pass  # Não faça nada
+
+    def add_scalars(self, *args, **kwargs):
+        pass  # Não faça nada
+
+    def add_figure(self, *args, **kwargs):
+        pass  # Não faça nada
+        
+    def add_histogram(self, *args, **kwargs):
+        pass  # Não faça nada
+        
+    def close(self, *args, **kwargs):
+        pass  # Não faça nada
+
 parser = argparse.ArgumentParser()
 parser.add_argument(
     "--task",
@@ -293,7 +314,7 @@ def compute_volume(
     if base_model == "NPE":
         # fitting NPE
         inference = NPE(prior_NPE, device=device)
-        inference._summary_writer = None
+        inference._summary_writer = MockSummaryWriter()
         inference.append_simulations(
             theta_train,
             X_train,
@@ -302,7 +323,7 @@ def compute_volume(
     elif base_model == "NPSE":
         # fitting diffusion model
         inference = NPSE(prior_NPE, device=device)
-        inference._summary_writer = None
+        inference._summary_writer = MockSummaryWriter()
         inference.append_simulations(
             theta=theta_train.to(device),
             x=X_train.to(device),
