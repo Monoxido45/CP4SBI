@@ -33,19 +33,22 @@ class MockSummaryWriter:
     Usado para enganar o sbi e impedi-lo de logar ou travar.
     """
     def add_scalar(self, *args, **kwargs):
-        pass  # Não faça nada
+        pass
 
     def add_scalars(self, *args, **kwargs):
-        pass  # Não faça nada
+        pass 
 
     def add_figure(self, *args, **kwargs):
-        pass  # Não faça nada
+        pass
         
     def add_histogram(self, *args, **kwargs):
-        pass  # Não faça nada
+        pass 
         
     def close(self, *args, **kwargs):
-        pass  # Não faça nada
+        pass
+
+    def flush(self, *args, **kwargs):
+        pass 
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
