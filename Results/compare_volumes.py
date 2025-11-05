@@ -728,7 +728,7 @@ def compute_volume_repeated(
         volume_results.append(volume_df)
 
         with open(checkpoint_file, "wb") as f:
-            pickle.dump(volume_results, f)
+            pickle.dump(volume_results, f, pickle.HIGHEST_PROTOCOL)
 
     # Combine results into a single DataFrame
     combined_volume_df = pd.concat(volume_results, ignore_index=True)

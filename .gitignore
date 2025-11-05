@@ -30,3 +30,5 @@ Results/volume_results/*results*
 *all_results_list*
 Experiments/*locart_masks*
 Experiments/*jrnmm_amortized*
+Experiments/*masks_jrnmm*
+Experiments/*list_jrnmm*
